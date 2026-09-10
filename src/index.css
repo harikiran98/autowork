@@ -1,0 +1,297 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Semantic colour tokens.
+
+   Every 2D surface, text and border in the app uses one of these — no raw
+   palette classes and no `dark:` variants in components. Dark mode is therefore
+   a single set of variable overrides, which means contrast is decided once,
+   here, instead of drifting component by component.
+--------------------------------------------------------------------------- */
+@theme {
+  --font-sans: "Segoe UI Variable", "Aptos", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+
+  /* Corners are a token so "no sharp edges" is enforced, not remembered. */
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.75rem;
+
+  --color-canvas: #edf1f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f4f6;
+  --color-glass: rgb(255 255 255 / 0.78);
+  --color-glass-strong: rgb(255 255 255 / 0.94);
+
+  --color-ink: #0f172a;
+  --color-ink-soft: #475569;
+  --color-ink-faint: #5b6b82;
+
+  --color-line: #e2e8f0;
+  --color-line-soft: rgb(15 23 42 / 0.07);
+
+  --color-accent: #5b5ce2;
+  --color-accent-ring: rgb(91 92 226 / 0.16);
+
+  /* High-contrast "selected" fill, inverted per theme. */
+  --color-solid: #0f172a;
+  --color-on-solid: #ffffff;
+
+  --color-ok: #10b981;
+  --color-warn: #f43f5e;
+  --color-neutral: #94a3b8;
+}
+
+:root[data-app-theme="dark"] {
+  --color-canvas: #0b0e14;
+  --color-surface: #181d27;
+  --color-surface-2: #222936;
+  --color-glass: rgb(20 25 34 / 0.76);
+  --color-glass-strong: rgb(20 25 34 / 0.94);
+
+  --color-ink: #f1f5f9;
+  --color-ink-soft: #cbd5e1;
+  --color-ink-faint: #97a5b8;
+
+  --color-line: #303846;
+  --color-line-soft: rgb(255 255 255 / 0.09);
+
+  --color-accent: #a5a6ff;
+  --color-accent-ring: rgb(165 166 255 / 0.2);
+
+  --color-solid: #e8edf7;
+  --color-on-solid: #0f1626;
+
+  --color-ok: #34d399;
+  --color-warn: #fb7185;
+  --color-neutral: #64748b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  overscroll-behavior: none;
+  letter-spacing: -0.012em;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--color-accent-ring);
+  outline-offset: 2px;
+}
+
+.auth-input {
+  width: 100%;
+  height: 3.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  color: var(--color-ink);
+  padding: 0 1rem;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+.auth-input::placeholder { color: var(--color-ink-faint); opacity: .72; }
+.auth-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 4px var(--color-accent-ring); outline: none; background: var(--color-surface); }
+.auth-orb { position: absolute; width: 24rem; height: 24rem; border-radius: 999px; filter: blur(70px); opacity: .18; pointer-events: none; }
+.auth-orb-one { left: -10rem; top: -8rem; background: #5b5ce2; }
+.auth-orb-two { right: -11rem; bottom: -8rem; background: #10b981; }
+.auth-node { transform-box: fill-box; transform-origin: center; animation: neuralBreathe 3.6s ease-in-out infinite; }
+.neural-vignette { background: radial-gradient(circle at 50% 45%, transparent 30%, rgb(2 7 12 / .42) 100%), linear-gradient(180deg, rgb(26 48 55 / .12), transparent 35%); }
+.neural-label { display: flex; align-items: center; gap: .45rem; white-space: nowrap; border: 1px solid rgb(255 255 255 / .12); border-radius: 999px; background: rgb(10 17 27 / .86); padding: .42rem .72rem; color: #f2f7ff; box-shadow: 0 12px 32px rgb(0 0 0 / .32); backdrop-filter: blur(12px); font: 600 11px/1 var(--font-sans); letter-spacing: .01em; }
+.neural-label span:last-child { color: #9cacc0; font-weight: 500; }
+.neural-core-label { text-transform: uppercase; letter-spacing: .13em; color: #bafced; }
+.neural-status-dot { display: block; width: .42rem; height: .42rem; flex: 0 0 auto; border-radius: 999px; box-shadow: 0 0 12px currentColor; }
+
+@keyframes neuralBreathe { 0%, 100% { transform: scale(.92); opacity: .75; } 50% { transform: scale(1.08); opacity: 1; } }
+
+/* Canvas owns the pointer; overlays opt back in with pointer-events-auto. */
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* ------------------------------ animations ------------------------------ */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.42; transform: scale(0.96); }
+  50% { opacity: 0.75; transform: scale(1.04); }
+}
+
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(52 211 153 / 0); }
+  50% { box-shadow: 0 0 0 5px rgb(52 211 153 / 0.12); }
+}
+
+.app-shell::before,
+.app-shell::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  width: 34rem;
+  height: 34rem;
+  border-radius: 9999px;
+  filter: blur(80px);
+  pointer-events: none;
+  animation: breathe 9s ease-in-out infinite;
+}
+
+.app-shell::before {
+  left: -14rem;
+  top: -16rem;
+  background: rgb(91 92 226 / 0.12);
+}
+
+.app-shell::after {
+  right: -16rem;
+  bottom: -18rem;
+  background: rgb(45 212 191 / 0.09);
+  animation-delay: -4.5s;
+}
+
+.glass-panel {
+  border: 1px solid var(--color-line-soft);
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 0.08), transparent 45%),
+    var(--color-glass);
+  box-shadow:
+    0 24px 70px rgb(2 6 23 / 0.16),
+    inset 0 1px 0 rgb(255 255 255 / 0.1);
+  backdrop-filter: blur(28px) saturate(1.2);
+}
+
+.panel-header-line {
+  border-bottom: 1px solid var(--color-line-soft);
+}
+
+.soft-button {
+  border: 1px solid var(--color-line-soft);
+  background: var(--color-surface-2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.live-dot {
+  animation: livePulse 2.4s ease-in-out infinite;
+}
+
+.scene-vignette {
+  background:
+    linear-gradient(to bottom, rgb(2 6 23 / 0.08), transparent 18%, transparent 76%, rgb(2 6 23 / 0.2)),
+    radial-gradient(circle at 50% 50%, transparent 45%, rgb(2 6 23 / 0.12));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------- scrollbar ------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------- rounded range input ------------------------ */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 9999px;
+  outline: none;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--pct, 50%),
+    var(--color-line) var(--pct, 50%),
+    var(--color-line) 100%
+  );
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 4px 12px -2px var(--color-accent-ring);
+  cursor: pointer;
+  transition: transform 150ms ease;
+}
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  cursor: pointer;
+}
