@@ -291,13 +291,18 @@ async function prepareAttachment(file: StoredFile): Promise<AttachmentContent> {
     return { name: file.name, mimeType: file.mimeType, kind: file.kind, text: capText(text) }
   }
   if (OFFICE_EXTENSIONS.has(ext) || ext === 'zip') {
+    let extracted = ''
     try {
-      const text = await extractZipDocument(file.name, file.blob)
-      if (text) return { name: file.name, mimeType: file.mimeType, kind: file.kind, text }
+      extracted = await extractZipDocument(file.name, file.blob)
     } catch {
-      // Corrupt, encrypted, or legacy Office files can still be sent natively
-      // to providers that support their binary format.
+      // Corrupt, encrypted, or legacy pre-XML Office files cannot be unzipped.
     }
+    if (extracted.trim()) return { name: file.name, mimeType: file.mimeType, kind: file.kind, text: extracted }
+    // Falling through to raw bytes here is worse than failing. Neither provider
+    // can read a binary Office package, so the agent would answer as though
+    // nothing had been attached — which reads as a broken product rather than
+    // an unreadable file. Name the problem and the fix instead.
+    throw new ApiError(`No readable text could be extracted from “${file.name}”. It may be an older binary .doc/.xls, password-protected, or an empty document. Re-save it as a modern .docx/.xlsx/.pptx, or export it to PDF and attach that.`)
   }
   return { name: file.name, mimeType: file.mimeType, kind: file.kind, data: await blobToBase64(file.blob) }
 }

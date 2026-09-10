@@ -6,6 +6,22 @@ import { getUser } from '@netlify/identity'
 
 const MAX_BODY_BYTES = 6 * 1024 * 1024
 const MAX_ATTACHMENTS = 12
+
+/**
+ * Upstream model budget, deliberately kept *below* Netlify's own synchronous
+ * function timeout.
+ *
+ * That platform limit is 10 seconds by default and 26 seconds at the very
+ * most, and Netlify enforces it by killing the invocation. A budget above the
+ * ceiling therefore does the opposite of what it looks like: the function is
+ * terminated before it can return the explanatory error below, so the browser
+ * receives a bare gateway 504 with no JSON body at all. Team assignments hit
+ * this first because the lead's planning and review calls are the largest and
+ * highest-effort requests the app makes.
+ *
+ * Set MODEL_TIMEOUT_MS if Netlify has granted this site a different ceiling.
+ */
+const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(120000, Number(process.env.MODEL_TIMEOUT_MS) || 24000))
 const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 const PROVIDERS = {
@@ -17,9 +33,12 @@ const PROVIDERS = {
       const isReasoning = /^o\d/.test(model)
       const content = [
         { type: 'text', text: prompt },
+        // Both parts need a full data URL. Passing bare base64 as `file_data`
+        // is accepted but unreadable, so the model answered as though nothing
+        // had been attached at all.
         ...attachments.map((file) => file.mimeType.startsWith('image/')
           ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
-          : { type: 'file', file: { filename: file.name, file_data: file.data } }),
+          : { type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` } }),
       ]
       return {
         model,
@@ -170,10 +189,7 @@ const handleEvent = async (event, authenticated = true) => {
         effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium',
         maxTokens: Math.max(1, Math.min(8192, Number(maxTokens) || 2048)),
       })),
-      // Netlify synchronous functions currently allow 60 seconds. Keep a
-      // small response margin while giving slower high-effort models more
-      // than twice the previous 26-second window.
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     })
     const data = await upstream.json().catch(() => ({}))
 
@@ -191,7 +207,11 @@ const handleEvent = async (event, authenticated = true) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed.'
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || message.toLowerCase().includes('timeout'))
-    return response(timedOut ? 504 : 400, { error: timedOut ? 'This model did not finish within the 55-second hosted response window. Retry with lower effort or a faster model; your task remains available to re-run.' : message })
+    return response(timedOut ? 504 : 400, {
+      error: timedOut
+        ? `This model did not finish within the ${Math.round(MODEL_TIMEOUT_MS / 1000)}-second hosted response window. Retry with lower effort or a faster model; your task remains available to re-run.`
+        : message,
+    })
   }
 }
 

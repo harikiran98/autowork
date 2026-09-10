@@ -108,10 +108,19 @@ when that task is run.
 Adding a provider means one entry in the `PROVIDERS` map in `server/index.mjs`
 plus one in `src/data/llm-catalog.ts`.
 
-Hosted model requests allow up to 55 seconds (inside Netlify's 60-second
-synchronous function limit). If a frontier model still exceeds that window,
-the task remains re-runnable and the UI recommends lower effort or a faster
-model instead of returning an unexplained timeout.
+Hosted model requests are budgeted at 24 seconds, which must stay **below**
+Netlify's own synchronous function timeout — 10 seconds by default and 26
+seconds at the very most. That ceiling is enforced by killing the invocation,
+so a budget above it is worse than a shorter one: the function never gets to
+return its explanatory error and the browser receives a bare gateway 504
+instead. Override with `MODEL_TIMEOUT_MS` if Netlify has granted your site a
+different ceiling. Within the budget, a task that exceeds the window remains
+re-runnable and the UI recommends lower effort or a faster model.
+
+Team assignments are the ones that press against this limit, because the team
+lead's planning and review calls are the largest and highest-effort requests
+the app makes. Each model call is its own HTTP request, so a long team
+workflow never needs one request to cover the whole thing.
 
 ## Run it (any platform)
 
@@ -223,7 +232,8 @@ task stuck forever.
 
 ```bash
 npm run test:mock       # fake model endpoint on :9911
-npm run test:e2e        # files + individual work + team review + reload + account isolation
+npm run test:e2e        # files + individual work + team review + shutdown/resume + reload + account isolation
+npm run test:scene      # 3D geometry: overlaps at 3-6 teams, seating, walking, camera resets
 npm run test:contrast   # WCAG AA audit of every text node, both themes
 npm run test:visual     # articulated joints, motion controls, camera visibility and responsive screenshots
 ```

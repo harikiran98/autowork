@@ -61,6 +61,8 @@ const WORKSPACE = join(ROOT, 'workspace')
 const DATA_DIR = join(ROOT, 'data')
 const STATE_FILE = join(DATA_DIR, 'state.json')
 const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+/** Mirrors the hosted gateway so a slow model behaves the same in both places. */
+const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(120000, Number(process.env.MODEL_TIMEOUT_MS) || 24000))
 
 /** Text formats an LLM can actually read as-is. Anything else is refused. */
 const TEXT_EXTENSIONS = new Set([
@@ -94,9 +96,11 @@ const PROVIDERS = {
       const isReasoning = /^o\d/.test(model)
       const content = [
         { type: 'text', text: prompt },
+        // Both parts need a full data URL; bare base64 in `file_data` is
+        // accepted but unreadable, so the model sees no attachment.
         ...attachments.map((file) => file.mimeType.startsWith('image/')
           ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
-          : { type: 'file', file: { filename: file.name, file_data: file.data } }),
+          : { type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` } }),
       ]
       return {
         model,
@@ -403,6 +407,9 @@ const server = createServer(async (req, res) => {
           body: JSON.stringify(
             adapter.body({ model, system, prompt: fullPrompt, effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium', maxTokens, attachments: nativeAttachments }),
           ),
+          // Same budget as the hosted gateway, so a model that is too slow for
+          // production fails the same way here instead of hanging forever.
+          signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
         })
         const data = await upstream.json().catch(() => ({}))
 

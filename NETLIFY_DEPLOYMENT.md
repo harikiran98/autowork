@@ -67,6 +67,23 @@ contexts** unless you intentionally maintain separate keys.
 Optional gateway overrides are `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL`.
 After changing variables, trigger a fresh deploy.
 
+### Function timeout — check this before blaming the app
+
+Netlify's synchronous function timeout is **10 seconds by default and 26
+seconds at most**, and on most plans the increase has to be requested from
+Netlify support. The platform enforces it by terminating the invocation, so if
+the gateway's own model budget is set higher, the function is killed before it
+can return its error and the browser gets a bare **504** with no message. That
+is the usual cause of a team assignment failing with `Request failed (504)`
+while short individual tasks succeed.
+
+The gateway budgets 24 seconds by default. If Netlify has raised your site's
+ceiling, set `MODEL_TIMEOUT_MS` to roughly two seconds below whatever it
+granted (for a 26-second ceiling, `24000`). Never set it above the ceiling.
+
+If team work still times out, lower the team lead's effort from High to Medium
+— the lead's planning and review calls are the largest requests in the app.
+
 Never prefix a secret with `VITE_`; Vite variables are shipped to the browser.
 
 ## 4. Enable login and create users
