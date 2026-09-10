@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { CHARACTER, gaitPose, useMotion } from './motion'
 
-export interface FigureMotion { distance: number; speed: number }
+export interface FigureMotion { distance: number; speed: number; pose?: 'seated' | 'standing'; seatLift?: number; carryingCoffee?: boolean }
 export interface FigureProps {
   torsoColor: string
   legColor?: string
@@ -36,6 +36,7 @@ export function DetailedFigure({ torsoColor, legColor = '#415269', skinColor, ac
   const arms = [useRef<THREE.Group>(null), useRef<THREE.Group>(null)]
   const elbows = [useRef<THREE.Group>(null), useRef<THREE.Group>(null)]
   const head = useRef<THREE.Group>(null)
+  const coffee = useRef<THREE.Group>(null)
   const time = useRef(variant * 0.83)
   const skin = skinColor ?? SKINS[variant % SKINS.length]
   const hair = HAIR[variant % HAIR.length]
@@ -47,15 +48,16 @@ export function DetailedFigure({ torsoColor, legColor = '#415269', skinColor, ac
     const t = time.current
     const amount = Math.min(1, (motion?.current.speed ?? 0) / 0.45)
     const pose = gaitPose(motion?.current.distance ?? 0, amount)
-    if (body.current) body.current.position.y = pose.bob
-    if (left.current) left.current.rotation.x = pose.left
-    if (right.current) right.current.rotation.x = pose.right
-    if (leftKnee.current) leftKnee.current.rotation.x = pose.leftKnee
-    if (rightKnee.current) rightKnee.current.rotation.x = pose.rightKnee
+    const seated = motion?.current.pose === 'seated' && amount < 0.15
+    if (body.current) body.current.position.y = (seated ? -0.28 + (motion?.current.seatLift ?? 0) : 0) + pose.bob
+    if (left.current) left.current.rotation.x = seated ? -1.18 : pose.left
+    if (right.current) right.current.rotation.x = seated ? -1.18 : pose.right
+    if (leftKnee.current) leftKnee.current.rotation.x = seated ? 1.34 : pose.leftKnee
+    if (rightKnee.current) rightKnee.current.rotation.x = seated ? 1.34 : pose.rightKnee
     for (let i = 0; i < 2; i++) {
       const arm = arms[i].current
       const elbow = elbows[i].current
-      const working = activity === 'working' && amount < 0.2
+      const working = activity === 'working' && seated
       if (arm) {
         arm.rotation.x = working ? -0.55 + Math.sin(t * 5 + i * Math.PI) * 0.035 : (i ? pose.left : pose.right) * 0.8
         arm.rotation.z = (i ? -1 : 1) * 0.035
@@ -66,6 +68,7 @@ export function DetailedFigure({ torsoColor, legColor = '#415269', skinColor, ac
       head.current.rotation.y = Math.sin(t * 0.6) * 0.09
       head.current.rotation.x = activity === 'working' ? 0.06 : Math.sin(t * 0.8) * 0.025
     }
+    if (coffee.current) coffee.current.visible = Boolean(motion?.current.carryingCoffee) && amount < 0.2
   })
 
   return <group ref={body} name="character-body">
@@ -98,6 +101,10 @@ export function DetailedFigure({ torsoColor, legColor = '#415269', skinColor, ac
           <Part size={[0.12, 0.135, 0.1]} at={[0, -0.29, 0.018]} color={skin} radius={0.04} />
           <Part size={[0.045, 0.07, 0.06]} at={[-side * 0.055, -0.265, 0.04]} color={skin} radius={0.022} />
           {i === 0 && <Part size={[0.14, 0.04, 0.035]} at={[0, -0.225, 0.087]} color="#232c39" radius={0.014} />}
+          {i === 0 && <group ref={coffee} position={[0, -0.37, 0.12]} visible={false}>
+            <mesh castShadow><cylinderGeometry args={[0.045, 0.037, 0.1, 16]} /><meshStandardMaterial color="#d8c6aa" roughness={0.45} /></mesh>
+            <mesh position={[0.052, 0, 0]} rotation={[Math.PI / 2, 0, 0]}><torusGeometry args={[0.027, 0.008, 6, 14]} /><meshStandardMaterial color="#d8c6aa" /></mesh>
+          </group>}
         </group>
       </group>)}
       <mesh position={[0, 0.505, 0]} castShadow><cylinderGeometry args={[0.074, 0.08, 0.11, 16]} /><meshStandardMaterial color={skin} roughness={0.65} /></mesh>

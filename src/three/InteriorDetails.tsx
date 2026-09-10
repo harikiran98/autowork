@@ -47,8 +47,8 @@ export function DeskAccessories({ x, z, facing, p }: { x: number; z: number; fac
   </group>
 }
 
-export function ArchitecturalDetails({ width, back, p }: { width: number; back: number; p: ScenePalette }) {
-  const sign = useSurfaceTexture('sign')
+export function ArchitecturalDetails({ width, back, p, workspaceName }: { width: number; back: number; p: ScenePalette; workspaceName: string }) {
+  const sign = useSurfaceTexture('sign', workspaceName)
   return <group>
     {/* Solid timber brand wall with vertical acoustic battens. */}
     <Block size={[6.1, 3.7, 0.18]} at={[0, 1.85, back + 0.12]} color="#31463f" />

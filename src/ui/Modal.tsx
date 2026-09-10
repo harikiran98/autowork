@@ -9,26 +9,28 @@ export function Modal({
   title,
   onClose,
   children,
+  dismissible = true,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
+  dismissible?: boolean
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || !dismissible) return
       e.stopPropagation()
       onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, dismissible])
 
   return createPortal(
     <div
       className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-5 backdrop-blur-sm"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (dismissible && e.target === e.currentTarget) onClose()
       }}
     >
       <div
@@ -40,7 +42,7 @@ export function Modal({
       >
         <div className="flex items-center justify-between px-6 pb-2 pt-5">
           <h2 className="text-base font-bold text-ink">{title}</h2>
-          <button
+          {dismissible && <button
             type="button"
             onClick={onClose}
             aria-label="Close"
@@ -49,7 +51,7 @@ export function Modal({
             <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
               <path d="M6 6l8 8M14 6l-8 8" />
             </svg>
-          </button>
+          </button>}
         </div>
         <div className="px-6 pb-6 pt-2">{children}</div>
       </div>

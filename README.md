@@ -5,17 +5,18 @@ you can configure, assign, and run. Built with React 19,
 react-three-fiber 9, three.js r186, drei 10, Zustand 5 and Tailwind CSS 4 on
 Vite, with local and Netlify serverless model gateways.
 
-The interface has invite-only Netlify Identity login, status-specific character
-motion, switchable office/neural-network views, responsive glass panels,
-per-user browser-local workspace persistence, task queues, file attachments,
+The interface has invite-only Netlify Identity login, personal workspace setup,
+free-form agent roles, individual and reviewed team assignments, switchable
+office/neural-network views, per-user persistence, broad file support, softened
 light/dark themes, and a Netlify-ready production configuration.
 
-The office includes standing desks, ergonomic chairs, oak flooring, monitor UI,
-desk accessories, a furnished lounge, plants, and autowork architectural signage.
-Characters have independently animated hips, knees, arms, and elbows. Motion can
-be paused, respects reduced-motion preferences, and uses actual travel distance
-to drive the walking cycle. Select a teammate for a close-up; Office view resets
-the camera. Both the compact mobile roster and desktop sidebar remain available.
+The office includes seated desk pods, ergonomic chairs, oak flooring, monitor UI,
+desk accessories, a furnished bench lounge, a complete cafeteria/coffee area,
+plants, and autowork architectural signage. Characters have independently
+animated hips, knees, arms, and elbows. They sit at workstations, walk for coffee
+when idle, walk to the cafeteria on a break, and physically travel to the Bench
+before sitting on its couch. Motion can be paused and uses actual travel distance
+to drive the walking cycle.
 
 ## Install on Windows
 
@@ -151,29 +152,41 @@ Until the file loads (or if none is set) the procedural figure renders instead.
 
 ## Using it
 
+**Account and workspace.** The first login asks for the owner's name and a
+workspace name. The initials button opens an account menu instead of signing
+out; the account page stores the owner, workspace name, login email, and contact
+number. Each login remains isolated in that browser.
+
 **Teams and agents.** The roster rail has *New agent* and *New team* at the
 bottom. A new team gets a desk pod laid out on the floor automatically — the
 floorplan, room size and camera framing are all computed from the current team
 list (`src/data/layout.ts`), so nothing is hand-positioned. Deleting a team
 moves its agents to the Bench rather than deleting them. Seats are positional:
-an agent's spot is its index within its team, and pods hold any number of
-agents by queueing extra rows behind the desk.
+an agent's spot is its index within its team, and pods create additional full
+desk-and-chair rows as needed. Roles are not selected from a fixed list: enter a
+role name and describe its responsibilities, then optionally make one member
+the team's lead and final reviewer.
 
-**Tasks and running them.** Open an agent and use the Tasks section. Each task
-is one independent model call using that agent's role charter, system prompt,
-temperature and model — no conversation is carried between tasks. **Run** works
-through the queue one task at a time (sequential, because parallel requests are
-the fastest way to hit a rate limit) and stops at the first failure, since a
-missing key or a bad model name would fail every remaining task identically.
+**Assignments and running them.** Open *Assign* to choose an individual agent or
+an entire team, write the brief, specify the exact output format, and attach
+files. Individual work is returned directly. Team work is split fairly across
+every member including the lead; contributions build on prior work, the lead
+reviews the combined result, unsatisfactory junior work is returned for one
+revision round, and the lead integrates the final client-ready output. Each
+agent has Low, Medium, or High effort instead of temperature; higher effort
+uses a larger token budget and provider reasoning effort where supported.
+Every completed team delivery is also published as a Markdown file in the
+shared workspace library, where any agent or team can attach it to later work.
 
-**Files.** *Files* in the top bar opens the workspace. Drop in text and code
-files; they are stored in this browser and persist across refreshes. Attach them
-per task — only those selected files are sent through the model gateway when
-the task runs.
+**Files.** *Files* accepts any file up to 10 MB and stores it in browser
+IndexedDB. Word, Excel, PowerPoint, OpenDocument and EPUB packages are converted
+to model-readable text; PDFs and supported images retain their native content;
+other binaries are retained and sent where the selected provider supports them.
+Only files explicitly attached to an assignment cross the model gateway.
 
-**Outputs.** *Outputs* lists every finished task newest first, with the agent,
-the task, the model, how long it took, and a copy button. Failures appear here
-too, with the provider's own error message.
+**Outputs.** *Outputs* lists both individual results and lead-reviewed team
+deliveries, including requested format, contributors, review rounds and copy
+controls. Failures appear here too with the provider's error message.
 
 **Persistence.** Teams, agents, task lists, outputs, and workspace files are
 browser-local, which works in both the static production bundle and local
@@ -185,7 +198,7 @@ task stuck forever.
 
 ```bash
 npm run test:mock       # fake model endpoint on :9911
-npm run test:e2e        # full flow: create team -> agent -> task -> run -> outputs -> reload
+npm run test:e2e        # files + individual work + team review + reload + account isolation
 npm run test:contrast   # WCAG AA audit of every text node, both themes
 npm run test:visual     # articulated joints, motion controls, camera visibility and responsive screenshots
 ```
@@ -211,10 +224,10 @@ dark mode is one block of variable overrides under
 `:root[data-app-theme="dark"]`. Contrast is therefore decided in a single place
 instead of drifting component by component.
 
-Data-driven chips (role, team, provider, model tier) are generated from one hex
+Data-driven chips (agent, team, provider, model tier) are generated from one hex
 each by `src/theme/pill.ts`, using fixed mix ratios tuned so the worst hue in
-the palette still clears WCAG AA for small text in both themes. Adding a role
-does not require hand-checking contrast again.
+the palette still clears WCAG AA for small text in both themes. Adding an agent
+color does not require hand-checking contrast again.
 
 `src/state/themeStore.ts` resolves the active theme as: explicit user choice →
 host `data-theme` attribute → OS `prefers-color-scheme`. It writes

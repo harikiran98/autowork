@@ -33,6 +33,8 @@ export function usePersistence() {
       if (
         state.teams === prev.teams &&
         state.agents === prev.agents &&
+        state.teamJobs === prev.teamJobs &&
+        state.profile === prev.profile &&
         state.showLabels === prev.showLabels
       ) {
         return

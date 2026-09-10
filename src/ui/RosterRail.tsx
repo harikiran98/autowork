@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { ROLE_BY_ID } from '../data/org'
 import { pendingCount, useWorkspace, type Agent } from '../state/workspaceStore'
 import { useAccentColor, useAvatarStyle } from '../theme/pill'
 import { CreateAgentDialog, CreateTeamDialog } from './CreateDialogs'
@@ -8,6 +7,7 @@ const STATUS_VAR: Record<Agent['status'], string> = {
   working: 'var(--color-ok)',
   idle: 'var(--color-neutral)',
   blocked: 'var(--color-warn)',
+  break: '#c9924c',
 }
 
 function PlusIcon() {
@@ -82,7 +82,6 @@ export function RosterRail() {
 
                   <div className="space-y-1">
                     {members.map((agent) => {
-                      const role = ROLE_BY_ID[agent.roleId]
                       const isActive = agent.id === selectedId
                       const queued = pendingCount(agent)
                       return (
@@ -97,13 +96,13 @@ export function RosterRail() {
                             isActive ? 'bg-solid text-on-solid shadow-lg shadow-black/15' : 'hover:bg-surface/70'
                           }`}
                         >
-                          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-[13px] text-[11px] font-bold shadow-sm" style={avatar(role.color)}>
+                          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-[13px] text-[11px] font-bold shadow-sm" style={avatar(agent.color)}>
                             {agent.name.slice(0, 2).toUpperCase()}
                             <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ${isActive ? 'ring-solid' : 'ring-surface'}`} style={{ background: STATUS_VAR[agent.status] }} />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className={`block truncate text-[13px] font-bold ${isActive ? 'text-on-solid' : 'text-ink'}`}>{agent.name}</span>
-                            <span className={`mt-0.5 block truncate text-[10px] ${isActive ? 'text-on-solid/60' : 'text-ink-faint'}`}>{role.label}</span>
+                            <span className={`mt-0.5 block truncate text-[10px] ${isActive ? 'text-on-solid/60' : 'text-ink-faint'}`}>{agent.roleName}{agent.isTeamLead ? ' · Lead' : ''}</span>
                           </span>
                           {queued > 0 && <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-on-solid/15 text-on-solid' : 'bg-surface-2 text-ink-soft'}`}>{queued}</span>}
                         </button>
@@ -127,10 +126,9 @@ export function RosterRail() {
       <nav className="pointer-events-none absolute bottom-3 left-3 right-3 z-30 xl:hidden">
         <div className="glass-panel pointer-events-auto flex items-center gap-2 overflow-x-auto rounded-[24px] p-2">
           {agents.map((agent) => {
-            const role = ROLE_BY_ID[agent.roleId]
             const selected = selectedId === agent.id
             return (
-              <button key={agent.id} type="button" aria-label={`${agent.name}, ${role.label}`} aria-pressed={selected} onClick={() => select(agent.id)} className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-[16px] text-[11px] font-bold shadow-sm transition-all ${selected ? 'scale-105 ring-2 ring-accent ring-offset-2 ring-offset-canvas' : 'opacity-80'}`} style={avatar(role.color)}>
+              <button key={agent.id} type="button" aria-label={`${agent.name}, ${agent.roleName}`} aria-pressed={selected} onClick={() => select(agent.id)} className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-[16px] text-[11px] font-bold shadow-sm transition-all ${selected ? 'scale-105 ring-2 ring-accent ring-offset-2 ring-offset-canvas' : 'opacity-80'}`} style={avatar(agent.color)}>
                 {agent.name.slice(0, 2).toUpperCase()}
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-surface" style={{ background: STATUS_VAR[agent.status] }} />
               </button>

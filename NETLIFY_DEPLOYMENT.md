@@ -57,7 +57,12 @@ Add at least one provider key:
 
 `WORKPLACE_ACCESS_CODE` is now optional because paid model calls also require a
 verified Identity session. You can still add it as a second shared secret.
-Scope secrets to **Functions** where your Netlify plan exposes variable scopes.
+Mark API keys as **Contains secret values**. On plans that expose variable
+scopes, **Functions** must be checked. If Netlify disables **All scopes** after
+you mark a variable secret and shows Builds/Functions/Runtime under Specific
+scopes, that is expected—leave those available scopes checked; no upgrade is
+needed just to make the function read the key. Use **Same value for all deploy
+contexts** unless you intentionally maintain separate keys.
 
 Optional gateway overrides are `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL`.
 After changing variables, trigger a fresh deploy.
@@ -91,10 +96,11 @@ Open the generated `https://YOUR-SITE.netlify.app` URL. Then check:
 2. Sign in using an invited account.
 3. `/api/health` returns JSON with `"ok": true`.
 4. The configured provider is `true` in the `providers` object.
-5. Select an agent, add a small task, and run it.
+5. Complete the workspace-name prompt, open **Assign**, add a small individual
+   assignment, and run it.
 6. Refresh the page and confirm the workspace is restored.
 
-Agent configuration and uploaded text files are stored in that browser. They
+Agent configuration and uploaded files are stored in that browser. They
 are not shared across devices or users. Attached file contents are sent to the
 configured AI provider only when a user explicitly runs that task.
 

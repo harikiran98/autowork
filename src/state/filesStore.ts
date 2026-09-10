@@ -29,10 +29,7 @@ export const useFiles = create<FilesState>((set, get) => ({
   add: async (file) => {
     set({ error: null })
     try {
-      // Binary files would arrive as mojibake and waste tokens, so the storage
-      // layer accepts only its explicit text/code allowlist.
-      const text = await file.text()
-      await uploadFile(file.name, text)
+      await uploadFile(file)
       await get().refresh()
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Upload failed.' })

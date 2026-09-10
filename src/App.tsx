@@ -9,6 +9,7 @@ import { usePersistence } from './state/persistence'
 import { useWorkspace } from './state/workspaceStore'
 import { useMotion } from './three/motion'
 import type { AutoworkUser } from './auth/AuthGate'
+import { AccountPanel } from './ui/AccountPanel'
 
 /**
  * Layout is deliberately flat: one full-bleed <Canvas> with the 2D chrome
@@ -25,6 +26,8 @@ export default function App({ user, onSignOut }: { user: AutoworkUser; onSignOut
   const motion = useMotion()
   const select = useWorkspace((s) => s.select)
   const [view, setView] = useState<'office' | 'neural'>('office')
+  const hydrated = useWorkspace((s) => s.hydrated)
+  const workspaceName = useWorkspace((s) => s.profile.workspaceName)
 
   return (
     <main className="app-shell relative h-dvh w-screen overflow-hidden bg-canvas antialiased">
@@ -67,6 +70,7 @@ export default function App({ user, onSignOut }: { user: AutoworkUser; onSignOut
           </div>
         </div>
       )}
+      {hydrated && !workspaceName && <AccountPanel user={user} firstRun onClose={() => undefined} />}
     </main>
   )
 }

@@ -29,21 +29,20 @@ export interface LayoutTeam {
   kind: TeamKind
 }
 
-/** Standing spot offset from the desk centre line. */
-export const POD_AGENT_Z = 1.45
-export const POD_CHAIR_Z = 2.45
+/** Seated workstation offset from the desk centre line. */
+export const POD_AGENT_Z = 1.52
+export const POD_CHAIR_Z = POD_AGENT_Z
 
 const POD_SPACING_X = 6.4
 const POD_SPACING_Z = 8.2
 const POD_COLUMNS = 3
-const LOUNGE_PER_ROW = 8
+const LOUNGE_PER_ROW = 3
 
 /**
  * Seat for the nth agent in a zone.
  *
- * Capacity is unbounded on purpose: agents 0-3 take the desk, and any beyond
- * that queue in rows behind it rather than stacking on one spot. Creating a
- * sixth teammate should never make one of them invisible.
+ * Capacity is unbounded on purpose: agents 0-3 take the first workstation row,
+ * and any beyond that take additional seated rows rather than stacking.
  */
 export function seatFor(zone: ZoneLayout, index: number): Seat {
   const [ox, oz] = zone.origin
@@ -52,8 +51,10 @@ export function seatFor(zone: ZoneLayout, index: number): Seat {
     const row = Math.floor(index / LOUNGE_PER_ROW)
     const col = index % LOUNGE_PER_ROW
     return {
-      position: [ox + (col - (Math.min(LOUNGE_PER_ROW, zone.headcount - row * LOUNGE_PER_ROW) - 1) / 2) * 1.2, 0.02, oz + row * 1.5],
+      position: [ox + (col - (Math.min(LOUNGE_PER_ROW, zone.headcount - row * LOUNGE_PER_ROW) - 1) / 2) * 1.35, 0.02, oz - 1.18 + row * 1.75],
       rotation: 0,
+      pose: 'seated',
+      place: 'bench',
     }
   }
 
@@ -65,6 +66,8 @@ export function seatFor(zone: ZoneLayout, index: number): Seat {
   return {
     position: [ox + (col === 0 ? -1.15 : 1.15), 0.02, oz + (nearSide ? depth : -depth)],
     rotation: nearSide ? Math.PI : 0,
+    pose: 'seated',
+    place: 'desk',
   }
 }
 
@@ -90,7 +93,7 @@ export function computeFloorplan(teams: LayoutTeam[], counts: Record<string, num
     const x = (col - (columns - 1) / 2) * POD_SPACING_X
     const z = -1 - row * POD_SPACING_Z
 
-    // Extra rows of standing agents need a longer rug under them.
+    // Extra workstation rows need a longer rug under their desks and chairs.
     const extraRows = Math.max(0, Math.ceil((counts[team.id] ?? 0) / 4) - 1)
     zones[team.id] = {
       id: team.id,
@@ -107,12 +110,12 @@ export function computeFloorplan(teams: LayoutTeam[], counts: Record<string, num
 
   lounges.forEach((team, i) => {
     const seats = counts[team.id] ?? 0
-    const wide = Math.min(Math.max(seats, 4), LOUNGE_PER_ROW)
+    const wide = Math.min(Math.max(seats, 3), LOUNGE_PER_ROW)
     zones[team.id] = {
       id: team.id,
       kind: 'lounge',
       origin: [0, loungeZ + i * 4.4],
-      rug: [Math.max(8.6, wide * 1.4 + 2.4), 3.4],
+      rug: [Math.max(8.6, wide * 1.4 + 2.4), Math.max(3.8, Math.ceil(seats / LOUNGE_PER_ROW) * 1.75 + 2.2)],
       signHeight: 2.2,
       headcount: seats,
     }
@@ -137,4 +140,25 @@ export function floorplanCentre(plan: Floorplan): [number, number] {
   const zs = Object.values(plan.zones).map((z) => z.origin[1])
   if (!zs.length) return [0, 0]
   return [0, (Math.min(...zs) + Math.max(...zs)) / 2]
+}
+
+/** Fixed break area beside the bench at the front-right of the office. */
+export function cafeteriaOrigin(plan: Floorplan): [number, number] {
+  const front = Math.max(5.2, ...Object.values(plan.zones).map((zone) => zone.origin[1]))
+  return [plan.room.width / 2 - 3.25, front]
+}
+
+export function cafeteriaSeat(plan: Floorplan, index: number): Seat {
+  const [x, z] = cafeteriaOrigin(plan)
+  const spots: Array<[number, number, number]> = [
+    [-0.85, -0.55, Math.PI / 4], [0.85, -0.55, -Math.PI / 4],
+    [-0.85, 0.7, Math.PI * 3 / 4], [0.85, 0.7, -Math.PI * 3 / 4],
+  ]
+  const [dx, dz, rotation] = spots[index % spots.length]
+  return { position: [x + dx, 0.02, z + dz], rotation, pose: 'seated', place: 'cafeteria' }
+}
+
+export function coffeeSpot(plan: Floorplan, index: number): Seat {
+  const [x, z] = cafeteriaOrigin(plan)
+  return { position: [x + 1.75 + (index % 2) * 0.35, 0.02, z - 1.15], rotation: -Math.PI / 2, pose: 'standing', place: 'cafeteria' }
 }

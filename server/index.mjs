@@ -55,11 +55,12 @@ function loadEnv() {
 loadEnv()
 
 const PORT = Number(process.env.PORT || 8787)
-const MAX_BODY_BYTES = 8 * 1024 * 1024
+const MAX_BODY_BYTES = 6 * 1024 * 1024
 const MAX_FILE_BYTES = 1024 * 1024
 const WORKSPACE = join(ROOT, 'workspace')
 const DATA_DIR = join(ROOT, 'data')
 const STATE_FILE = join(DATA_DIR, 'state.json')
+const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 /** Text formats an LLM can actually read as-is. Anything else is refused. */
 const TEXT_EXTENSIONS = new Set([
@@ -87,19 +88,26 @@ const PROVIDERS = {
     // Override to point at Azure OpenAI, a corporate gateway, or a local mock.
     endpoint: `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`,
     headers: (key) => ({ 'content-type': 'application/json', authorization: `Bearer ${key}` }),
-    body: ({ model, system, prompt, temperature, maxTokens }) => {
+    body: ({ model, system, prompt, effort, maxTokens, attachments }) => {
       // o-series reasoning models reject `temperature` and rename the token
       // budget. Sending the chat-model shape to them is a 400.
       const isReasoning = /^o\d/.test(model)
+      const content = [
+        { type: 'text', text: prompt },
+        ...attachments.map((file) => file.mimeType.startsWith('image/')
+          ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
+          : { type: 'file', file: { filename: file.name, file_data: file.data } }),
+      ]
       return {
         model,
         messages: [
           ...(system ? [{ role: 'system', content: system }] : []),
-          { role: 'user', content: prompt },
+          { role: 'user', content: attachments.length ? content : prompt },
         ],
         ...(isReasoning
           ? { max_completion_tokens: maxTokens }
-          : { temperature, max_tokens: maxTokens }),
+          : { max_tokens: maxTokens }),
+        reasoning_effort: effort,
       }
     },
     text: (json) => json?.choices?.[0]?.message?.content ?? '',
@@ -114,12 +122,20 @@ const PROVIDERS = {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     }),
-    body: ({ model, system, prompt, temperature, maxTokens }) => ({
+    body: ({ model, system, prompt, effort, maxTokens, attachments }) => ({
       model,
       max_tokens: maxTokens,
-      temperature,
+      ...(/(?:-5|4\.[6-9])/.test(model) ? { thinking: { type: 'adaptive' }, output_config: { effort } } : {}),
       ...(system ? { system } : {}),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{
+        role: 'user',
+        content: attachments.length ? [
+          ...attachments.map((file) => file.mimeType === 'application/pdf'
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.data } }
+            : { type: 'image', source: { type: 'base64', media_type: file.mimeType, data: file.data } }),
+          { type: 'text', text: prompt },
+        ] : prompt,
+      }],
     }),
     text: (json) =>
       Array.isArray(json?.content)
@@ -174,6 +190,17 @@ function safeFilename(name) {
   if (!base || base.startsWith('.')) return null
   if (!TEXT_EXTENSIONS.has(extname(base).toLowerCase())) return null
   return base
+}
+
+function cleanAttachment(item) {
+  if (!item || typeof item !== 'object') return null
+  const name = basename(String(item.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '')).trim()
+  const mimeType = String(item.mimeType || 'application/octet-stream').toLowerCase().slice(0, 120)
+  const kind = String(item.kind || 'binary').slice(0, 24)
+  const text = typeof item.text === 'string' ? item.text : ''
+  const data = typeof item.data === 'string' && /^[a-zA-Z0-9+/]*={0,2}$/.test(item.data) ? item.data : ''
+  if (!name || name.startsWith('.') || (!text && !data)) return null
+  return { name: name.slice(0, 180), mimeType, kind, ...(text ? { text } : { data }) }
 }
 
 const listFiles = () => {
@@ -310,7 +337,7 @@ const server = createServer(async (req, res) => {
         model,
         prompt,
         system = '',
-        temperature = 0.3,
+        effort = 'medium',
         maxTokens = 2048,
         attachments = [],
         attachmentContents = [],
@@ -348,23 +375,33 @@ const server = createServer(async (req, res) => {
         fullPrompt += `\n\n--- FILE: ${name} ---\n${readFileSync(file, 'utf8')}`
       }
 
-      // The deployable client keeps workspace files in the browser because a
-      // Netlify function has no durable disk. Accept the same payload locally
-      // so development and production exercise one request contract.
-      for (const item of Array.isArray(attachmentContents) ? attachmentContents.slice(0, 12) : []) {
-        const name = safeFilename(item?.name)
-        const content = String(item?.content ?? '')
-        if (!name || !content || used.includes(name)) continue
-        used.push(name)
-        fullPrompt += `\n\n--- FILE: ${name} ---\n${content}`
+      // The deployable client keeps files in IndexedDB because a Netlify
+      // function has no durable disk. Accept extracted text and native binary
+      // payloads locally so development and production share one contract.
+      const prepared = Array.isArray(attachmentContents)
+        ? attachmentContents.slice(0, 12).map(cleanAttachment).filter(Boolean)
+        : []
+      for (const item of prepared.filter((file) => file.text)) {
+        if (used.includes(item.name)) continue
+        used.push(item.name)
+        fullPrompt += `\n\n--- FILE: ${item.name} (${item.mimeType}) ---\n${item.text}`
       }
+      const nativeAttachments = prepared.filter((file) => file.data && !used.includes(file.name))
+      if (provider === 'anthropic') {
+        const unsupported = nativeAttachments.filter((file) => file.mimeType !== 'application/pdf' && !ANTHROPIC_IMAGE_TYPES.has(file.mimeType))
+        if (unsupported.length) {
+          json(res, 415, { error: `Claude cannot read ${unsupported.map((file) => file.name).join(', ')} in its original binary format. Use a modern DOCX/XLSX/PPTX file, convert it to PDF, or run this task with an OpenAI agent.` })
+          return
+        }
+      }
+      used.push(...nativeAttachments.map((file) => file.name))
 
       try {
         const upstream = await fetch(adapter.endpoint, {
           method: 'POST',
           headers: adapter.headers(key),
           body: JSON.stringify(
-            adapter.body({ model, system, prompt: fullPrompt, temperature, maxTokens }),
+            adapter.body({ model, system, prompt: fullPrompt, effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium', maxTokens, attachments: nativeAttachments }),
           ),
         })
         const data = await upstream.json().catch(() => ({}))

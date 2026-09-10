@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
-import { ROLES, type RoleId } from '../data/org'
 import { useWorkspace } from '../state/workspaceStore'
 import { useAccentColor } from '../theme/pill'
 
@@ -84,11 +83,13 @@ export function CreateAgentDialog({ onClose }: { onClose: () => void }) {
 
   const [name, setName] = useState('')
   const [teamId, setTeamId] = useState(teams[0]?.id ?? 'bench')
-  const [roleId, setRoleId] = useState<RoleId>('full-stack-developer')
+  const [roleName, setRoleName] = useState('')
+  const [roleDescription, setRoleDescription] = useState('')
+  const [isTeamLead, setIsTeamLead] = useState(false)
 
   const submit = () => {
-    if (!name.trim()) return
-    createAgent({ name, teamId, roleId })
+    if (!name.trim() || !roleName.trim()) return
+    createAgent({ name, teamId, roleName, roleDescription, isTeamLead })
     onClose()
   }
 
@@ -138,31 +139,21 @@ export function CreateAgentDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div>
-          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Role</span>
-          <div className="space-y-1.5">
-            {ROLES.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                aria-pressed={r.id === roleId}
-                onClick={() => setRoleId(r.id)}
-                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left transition-all duration-200 ${
-                  r.id === roleId
-                    ? 'bg-surface shadow-md shadow-black/10 ring-2 ring-accent'
-                    : 'bg-surface/60 ring-1 ring-line hover:bg-surface'
-                }`}
-              >
-                <span className="h-6 w-1.5 shrink-0 rounded-full" style={{ background: accent(r.color) }} />
-                <span className="text-sm font-semibold text-ink">{r.label}</span>
-              </button>
-            ))}
-          </div>
+          <label htmlFor="agent-role-name" className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Role name</label>
+          <input id="agent-role-name" value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="Research strategist" className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-medium text-ink outline-none transition-all placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" />
         </div>
+
+        <div>
+          <label htmlFor="agent-role-description" className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Describe the role</label>
+          <textarea id="agent-role-description" rows={3} value={roleDescription} onChange={(e) => setRoleDescription(e.target.value)} placeholder="What this agent owns, how they should work, and what excellent output looks like." className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none transition-all placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" />
+        </div>
+
+        {teamId !== 'bench' && <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-line bg-surface/60 px-4 py-3"><input type="checkbox" checked={isTeamLead} onChange={(e) => setIsTeamLead(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]" /><span><span className="block text-sm font-semibold text-ink">Make this agent the team lead</span><span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">The lead delegates team assignments, reviews contributions, and delivers the final output.</span></span></label>}
 
         <div className="flex gap-2.5 pt-1">
           <button
             type="submit"
-            disabled={!name.trim()}
+          disabled={!name.trim() || !roleName.trim()}
             className="flex-1 rounded-2xl bg-solid py-3 text-sm font-semibold text-on-solid shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
           >
             Create agent

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 
 // Locally generated surface detail: no remote assets or texture downloads.
-export function useSurfaceTexture(kind: 'oak' | 'carpet' | 'screen' | 'sign') {
+export function useSurfaceTexture(kind: 'oak' | 'carpet' | 'screen' | 'sign', workspaceName = 'Workspace') {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas')
     canvas.width = kind === 'sign' ? 1024 : 512
@@ -32,7 +32,7 @@ export function useSurfaceTexture(kind: 'oak' | 'carpet' | 'screen' | 'sign') {
     } else if (kind === 'screen') {
       c.fillStyle = '#15232e'; c.fillRect(0, 0, 512, 512)
       c.fillStyle = '#253744'; c.fillRect(0, 0, 512, 55); c.fillRect(0, 55, 85, 457)
-      c.fillStyle = '#dde9ec'; c.font = 'bold 25px sans-serif'; c.fillText('autowork', 21, 37)
+      c.fillStyle = '#dde9ec'; c.font = 'bold 25px sans-serif'; c.fillText(workspaceName.slice(0, 24), 21, 37)
       for (let row = 0; row < 16; row++) {
         c.fillStyle = ['#73c7b4', '#d7c89a', '#849fc9'][row % 3]
         c.fillRect(108 + (row % 3) * 18, 82 + row * 22, 80 + random() * 200, 5)
@@ -40,7 +40,11 @@ export function useSurfaceTexture(kind: 'oak' | 'carpet' | 'screen' | 'sign') {
       c.fillStyle = '#46bda5'; c.fillRect(108, 463, 220, 7)
     } else {
       c.clearRect(0, 0, 1024, 256)
-      c.fillStyle = '#f0ede4'; c.font = '600 128px Segoe UI, sans-serif'; c.textAlign = 'center'; c.fillText('autowork', 512, 144)
+      const label = workspaceName.trim() || 'Workspace'
+      let size = 128
+      c.textAlign = 'center'
+      do { c.font = `600 ${size}px Segoe UI, sans-serif`; size -= 4 } while (c.measureText(label).width > 900 && size > 54)
+      c.fillStyle = '#f0ede4'; c.fillText(label, 512, 144)
       c.fillStyle = '#b3c0b9'; c.font = '22px Segoe UI, sans-serif'; c.fillText('A SPACE FOR IDEAS TO BECOME WORK.', 512, 199)
     }
     const result = new THREE.CanvasTexture(canvas)
@@ -51,7 +55,7 @@ export function useSurfaceTexture(kind: 'oak' | 'carpet' | 'screen' | 'sign') {
       result.repeat.set(kind === 'oak' ? 3 : 2, kind === 'oak' ? 3 : 2)
     }
     return result
-  }, [kind])
+  }, [kind, workspaceName])
   useEffect(() => () => texture.dispose(), [texture])
   return texture
 }

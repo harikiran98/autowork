@@ -7,7 +7,7 @@ import { Lighting } from './Lighting'
 import { LegoAgent } from './LegoAgent'
 import { useWorkspace } from '../state/workspaceStore'
 import { useFloorplan } from '../state/useFloorplan'
-import { floorplanCentre } from '../data/layout'
+import { cafeteriaSeat, coffeeSpot, floorplanCentre } from '../data/layout'
 import { useScenePalette } from '../theme/palette'
 import { useMotion } from './motion'
 
@@ -108,11 +108,11 @@ function CameraRig({ home }: { home: THREE.Vector3 }) {
 
 function Agents() {
   const agents = useWorkspace((s) => s.agents)
-  const { seats } = useFloorplan()
+  const { seats, plan } = useFloorplan()
   return (
     <>
-      {agents.map((agent) =>
-        seats[agent.id] ? <LegoAgent key={agent.id} agent={agent} seat={seats[agent.id]} /> : null,
+      {agents.map((agent, index) =>
+        seats[agent.id] ? <LegoAgent key={agent.id} agent={agent} seat={seats[agent.id]} breakSeat={cafeteriaSeat(plan, index)} coffeeSeat={coffeeSpot(plan, index)} /> : null,
       )}
     </>
   )

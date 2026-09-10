@@ -4,23 +4,31 @@
  */
 import { getUser } from '@netlify/identity'
 
-const MAX_BODY_BYTES = 3 * 1024 * 1024
+const MAX_BODY_BYTES = 6 * 1024 * 1024
 const MAX_ATTACHMENTS = 12
+const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 const PROVIDERS = {
   openai: {
     envKey: 'OPENAI_API_KEY',
     endpoint: () => `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`,
     headers: (key) => ({ 'content-type': 'application/json', authorization: `Bearer ${key}` }),
-    body: ({ model, system, prompt, temperature, maxTokens }) => {
+    body: ({ model, system, prompt, effort, maxTokens, attachments }) => {
       const isReasoning = /^o\d/.test(model)
+      const content = [
+        { type: 'text', text: prompt },
+        ...attachments.map((file) => file.mimeType.startsWith('image/')
+          ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
+          : { type: 'file', file: { filename: file.name, file_data: file.data } }),
+      ]
       return {
         model,
         messages: [
           ...(system ? [{ role: 'system', content: system }] : []),
-          { role: 'user', content: prompt },
+          { role: 'user', content: attachments.length ? content : prompt },
         ],
-        ...(isReasoning ? { max_completion_tokens: maxTokens } : { temperature, max_tokens: maxTokens }),
+        ...(isReasoning ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+        reasoning_effort: effort,
       }
     },
     text: (data) => data?.choices?.[0]?.message?.content ?? '',
@@ -33,12 +41,20 @@ const PROVIDERS = {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     }),
-    body: ({ model, system, prompt, temperature, maxTokens }) => ({
+    body: ({ model, system, prompt, effort, maxTokens, attachments }) => ({
       model,
       max_tokens: maxTokens,
-      temperature,
+      ...(/(?:-5|4\.[6-9])/.test(model) ? { thinking: { type: 'adaptive' }, output_config: { effort } } : {}),
       ...(system ? { system } : {}),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{
+        role: 'user',
+        content: attachments.length ? [
+          ...attachments.map((file) => file.mimeType === 'application/pdf'
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.data } }
+            : { type: 'image', source: { type: 'base64', media_type: file.mimeType, data: file.data } }),
+          { type: 'text', text: prompt },
+        ] : prompt,
+      }],
     }),
     text: (data) => Array.isArray(data?.content)
       ? data.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
@@ -66,9 +82,12 @@ const parseBody = (event) => {
 const cleanAttachment = (item) => {
   if (!item || typeof item !== 'object') return null
   const name = String(item.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').split(/[\\/]/).pop()?.trim()
-  const content = String(item.content ?? '')
-  if (!name || !content) return null
-  return { name: name.slice(0, 180), content }
+  const mimeType = String(item.mimeType || 'application/octet-stream').toLowerCase().slice(0, 120)
+  const kind = String(item.kind || 'binary').slice(0, 24)
+  const text = typeof item.text === 'string' ? item.text : ''
+  const data = typeof item.data === 'string' && /^[a-zA-Z0-9+/]*={0,2}$/.test(item.data) ? item.data : ''
+  if (!name || (!text && !data)) return null
+  return { name: name.slice(0, 180), mimeType, kind, ...(text ? { text } : { data }) }
 }
 
 const handleEvent = async (event, authenticated = true) => {
@@ -106,7 +125,7 @@ const handleEvent = async (event, authenticated = true) => {
       model,
       prompt,
       system = '',
-      temperature = 0.3,
+      effort = 'medium',
       maxTokens = 2048,
       attachmentContents = [],
     } = body
@@ -126,10 +145,19 @@ const handleEvent = async (event, authenticated = true) => {
     const attachments = Array.isArray(attachmentContents)
       ? attachmentContents.slice(0, MAX_ATTACHMENTS).map(cleanAttachment).filter(Boolean)
       : []
-    const fullPrompt = attachments.reduce(
-      (text, file) => `${text}\n\n--- FILE: ${file.name} ---\n${file.content}`,
+    const fullPrompt = attachments.filter((file) => file.text).reduce(
+      (text, file) => `${text}\n\n--- FILE: ${file.name} (${file.mimeType}) ---\n${file.text}`,
       String(prompt),
     )
+    const nativeAttachments = attachments.filter((file) => file.data)
+    if (provider === 'anthropic') {
+      const unsupported = nativeAttachments.filter((file) => file.mimeType !== 'application/pdf' && !ANTHROPIC_IMAGE_TYPES.has(file.mimeType))
+      if (unsupported.length) {
+        return response(415, {
+          error: `Claude cannot read ${unsupported.map((file) => file.name).join(', ')} in its original binary format. Use a modern DOCX/XLSX/PPTX file, convert it to PDF, or run this task with an OpenAI agent.`,
+        })
+      }
+    }
 
     const upstream = await fetch(adapter.endpoint(), {
       method: 'POST',
@@ -138,7 +166,8 @@ const handleEvent = async (event, authenticated = true) => {
         model: String(model),
         system: String(system),
         prompt: fullPrompt,
-        temperature: Math.max(0, Math.min(1, Number(temperature) || 0)),
+        attachments: nativeAttachments,
+        effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium',
         maxTokens: Math.max(1, Math.min(8192, Number(maxTokens) || 2048)),
       })),
       signal: AbortSignal.timeout(26000),

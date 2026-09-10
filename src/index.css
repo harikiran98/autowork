@@ -16,25 +16,25 @@
   --radius-2xl: 1.25rem;
   --radius-3xl: 1.75rem;
 
-  --color-canvas: #edf1f4;
-  --color-surface: #ffffff;
-  --color-surface-2: #f1f4f6;
-  --color-glass: rgb(255 255 255 / 0.78);
-  --color-glass-strong: rgb(255 255 255 / 0.94);
+  --color-canvas: #dfe5e2;
+  --color-surface: #eef2f0;
+  --color-surface-2: #d7dfdc;
+  --color-glass: rgb(236 241 239 / 0.8);
+  --color-glass-strong: rgb(239 243 241 / 0.94);
 
-  --color-ink: #0f172a;
-  --color-ink-soft: #475569;
-  --color-ink-faint: #5b6b82;
+  --color-ink: #283430;
+  --color-ink-soft: #4c5d57;
+  --color-ink-faint: #53635d;
 
-  --color-line: #e2e8f0;
-  --color-line-soft: rgb(15 23 42 / 0.07);
+  --color-line: #c3ceca;
+  --color-line-soft: rgb(40 52 48 / 0.1);
 
-  --color-accent: #5b5ce2;
-  --color-accent-ring: rgb(91 92 226 / 0.16);
+  --color-accent: #46567c;
+  --color-accent-ring: rgb(70 86 124 / 0.16);
 
   /* High-contrast "selected" fill, inverted per theme. */
-  --color-solid: #0f172a;
-  --color-on-solid: #ffffff;
+  --color-solid: #34443f;
+  --color-on-solid: #f1f5f3;
 
   --color-ok: #10b981;
   --color-warn: #f43f5e;
@@ -42,24 +42,24 @@
 }
 
 :root[data-app-theme="dark"] {
-  --color-canvas: #0b0e14;
-  --color-surface: #181d27;
-  --color-surface-2: #222936;
-  --color-glass: rgb(20 25 34 / 0.76);
-  --color-glass-strong: rgb(20 25 34 / 0.94);
+  --color-canvas: #18211f;
+  --color-surface: #222c29;
+  --color-surface-2: #2b3733;
+  --color-glass: rgb(31 42 39 / 0.8);
+  --color-glass-strong: rgb(32 43 40 / 0.94);
 
-  --color-ink: #f1f5f9;
-  --color-ink-soft: #cbd5e1;
-  --color-ink-faint: #97a5b8;
+  --color-ink: #d9e2de;
+  --color-ink-soft: #b1c0ba;
+  --color-ink-faint: #91a29c;
 
-  --color-line: #303846;
-  --color-line-soft: rgb(255 255 255 / 0.09);
+  --color-line: #3c4945;
+  --color-line-soft: rgb(222 232 228 / 0.1);
 
-  --color-accent: #a5a6ff;
-  --color-accent-ring: rgb(165 166 255 / 0.2);
+  --color-accent: #aebbd8;
+  --color-accent-ring: rgb(174 187 216 / 0.18);
 
-  --color-solid: #e8edf7;
-  --color-on-solid: #0f1626;
+  --color-solid: #c7d3ce;
+  --color-on-solid: #24302c;
 
   --color-ok: #34d399;
   --color-warn: #fb7185;
@@ -116,10 +116,10 @@ textarea:focus-visible {
 .auth-orb-one { left: -10rem; top: -8rem; background: #5b5ce2; }
 .auth-orb-two { right: -11rem; bottom: -8rem; background: #10b981; }
 .auth-node { transform-box: fill-box; transform-origin: center; animation: neuralBreathe 3.6s ease-in-out infinite; }
-.neural-vignette { background: radial-gradient(circle at 50% 45%, transparent 30%, rgb(2 7 12 / .42) 100%), linear-gradient(180deg, rgb(26 48 55 / .12), transparent 35%); }
-.neural-label { display: flex; align-items: center; gap: .45rem; white-space: nowrap; border: 1px solid rgb(255 255 255 / .12); border-radius: 999px; background: rgb(10 17 27 / .86); padding: .42rem .72rem; color: #f2f7ff; box-shadow: 0 12px 32px rgb(0 0 0 / .32); backdrop-filter: blur(12px); font: 600 11px/1 var(--font-sans); letter-spacing: .01em; }
-.neural-label span:last-child { color: #9cacc0; font-weight: 500; }
-.neural-core-label { text-transform: uppercase; letter-spacing: .13em; color: #bafced; }
+.neural-vignette { background: radial-gradient(circle at 50% 45%, transparent 28%, rgb(26 39 36 / .25) 100%), linear-gradient(180deg, rgb(111 137 130 / .08), transparent 38%); }
+.neural-label { display: flex; align-items: center; gap: .45rem; white-space: nowrap; border: 1px solid var(--color-line-soft); border-radius: 999px; background: var(--color-glass-strong); padding: .42rem .72rem; color: var(--color-ink); box-shadow: 0 12px 32px rgb(16 27 24 / .2); backdrop-filter: blur(14px); font: 600 11px/1 var(--font-sans); letter-spacing: .01em; }
+.neural-label span:last-child { color: var(--color-ink-faint); font-weight: 500; }
+.neural-core-label { text-transform: uppercase; letter-spacing: .13em; color: var(--color-ink-soft); }
 .neural-status-dot { display: block; width: .42rem; height: .42rem; flex: 0 0 auto; border-radius: 999px; box-shadow: 0 0 12px currentColor; }
 
 @keyframes neuralBreathe { 0%, 100% { transform: scale(.92); opacity: .75; } 50% { transform: scale(1.08); opacity: 1; } }

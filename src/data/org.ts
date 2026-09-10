@@ -1,83 +1,20 @@
-/**
- * Fixed vocabulary: the roles an agent can hold, and the seed teams.
- *
- * Teams themselves are no longer defined here — they live in the store because
- * you can create them at runtime. What stays static is the role list (a job
- * title vocabulary) and the tint palette new teams draw from.
- */
+/** Runtime organization primitives. Agent roles are intentionally not a fixed
+ * vocabulary: every agent owns a free-form title and description. */
 
-export type RoleId =
-  | 'team-lead'
-  | 'scrum-master'
-  | 'business-analyst'
-  | 'full-stack-developer'
-  | 'qa-tester'
-
-export interface Role {
-  id: RoleId
-  label: string
-  blurb: string
-  /**
-   * Minifigure torso colour, and the single hex every role chip in the 2D UI
-   * is derived from (see theme/pill.ts). One value, both themes.
-   */
-  color: string
-  /** Prepended to the agent's own system prompt when a task runs. */
-  charter: string
-}
-
-export const ROLES: Role[] = [
-  {
-    id: 'team-lead',
-    label: 'Team Lead',
-    blurb: 'Owns delivery, unblocks the team, signs off on work.',
-    color: '#4f5bd5',
-    charter:
-      'You are a team lead. Prioritise ruthlessly, call out risks and dependencies, and end with a clear decision or recommendation.',
-  },
-  {
-    id: 'scrum-master',
-    label: 'Scrum Master',
-    blurb: 'Runs ceremonies, protects focus, tracks flow.',
-    color: '#c65cd4',
-    charter:
-      'You are a scrum master. Break work into small increments, surface blockers early, and keep output concrete and actionable.',
-  },
-  {
-    id: 'business-analyst',
-    label: 'Business Analyst',
-    blurb: 'Turns intent into requirements and acceptance criteria.',
-    color: '#f0a830',
-    charter:
-      'You are a business analyst. Turn intent into numbered requirements with testable acceptance criteria. Flag ambiguities rather than guessing.',
-  },
-  {
-    id: 'full-stack-developer',
-    label: 'Full Stack Developer',
-    blurb: 'Implements features end to end, front and back.',
-    color: '#2fa96b',
-    charter:
-      'You are a full stack developer. Produce working, complete code with brief reasoning. State assumptions explicitly instead of inventing requirements.',
-  },
-  {
-    id: 'qa-tester',
-    label: 'QA Tester',
-    blurb: 'Writes and runs tests, guards the release gate.',
-    color: '#e2555f',
-    charter:
-      'You are a QA tester. Write concrete test cases including edge cases and failure modes, and say plainly what you could not verify.',
-  },
+export const AGENT_COLORS = [
+  '#6172d9', '#3f9b7a', '#b27643', '#9a63b0', '#b85f68',
+  '#4e8ba8', '#71894c', '#a87157', '#6d7892', '#447f79',
 ]
-
-export const ROLE_BY_ID = Object.fromEntries(ROLES.map((r) => [r.id, r])) as Record<RoleId, Role>
 
 export type TeamKind = 'pod' | 'lounge'
 
 export interface Seat {
-  /** World-space position of the minifigure's feet. */
+  /** World-space destination of the character root. */
   position: [number, number, number]
   /** Y rotation in radians. Models are authored facing +Z. */
   rotation: number
+  pose: 'seated' | 'standing'
+  place: 'desk' | 'bench' | 'cafeteria'
 }
 
 export interface Team {

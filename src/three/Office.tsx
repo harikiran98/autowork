@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo } from 'react'
 import { Html, RoundedBox } from '@react-three/drei'
 import * as THREE from 'three'
-import { POD_CHAIR_Z, type Floorplan, type ZoneLayout } from '../data/layout'
+import { cafeteriaOrigin, POD_CHAIR_Z, type Floorplan, type ZoneLayout } from '../data/layout'
 import type { Team } from '../data/org'
 import { useWorkspace, teamHeadcount } from '../state/workspaceStore'
 import { useFloorplan } from '../state/useFloorplan'
@@ -66,14 +66,16 @@ function Rug({
 function Monitor({
   position,
   rotation = 0,
+  workspaceName,
   p,
 }: {
   position: [number, number, number]
   rotation?: number
+  workspaceName: string
   tint: string
   p: ScenePalette
 }) {
-  const screen = useSurfaceTexture('screen')
+  const screen = useSurfaceTexture('screen', workspaceName)
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 0.02, 0]} castShadow>
@@ -127,16 +129,20 @@ function Plant({ position, p }: { position: [number, number, number]; p: ScenePa
 
 /* ------------------------------ team zone ------------------------------ */
 
-function DeskPod({ zone, tint, p }: { zone: ZoneLayout; tint: string; p: ScenePalette }) {
+function DeskPod({ zone, tint, p, workspaceName }: { zone: ZoneLayout; tint: string; p: ScenePalette; workspaceName: string }) {
   const [x, z] = zone.origin
   const screenTint = themedTint(tint, p, p.privacyMix)
   const oak = useSurfaceTexture('oak')
+  const workstationRows = Math.max(1, Math.ceil(zone.headcount / 4))
 
   return (
     <group position={[x, 0, z]}>
-      {/* two desk tops back to back */}
-      {[-0.62, 0.62].map((dz) => (
-        <Fragment key={dz}>
+      {/* Each group of four teammates gets a complete back-to-back desk row.
+          This keeps dynamically-added agents seated at real workstations. */}
+      {Array.from({ length: workstationRows }, (_, row) => row).flatMap((row) => [-1, 1].map((side) => {
+        const dz = side * (0.62 + row * 1.3)
+        return (
+        <Fragment key={`${row}:${side}`}>
           <RoundedBox args={[4.2, 0.09, 1.05]} radius={0.035} smoothness={4} position={[0, 1.075, dz]} castShadow receiveShadow>
             <meshStandardMaterial map={oak} color={p.deskTop} roughness={0.58} />
           </RoundedBox>
@@ -146,28 +152,22 @@ function DeskPod({ zone, tint, p }: { zone: ZoneLayout; tint: string; p: ScenePa
               <meshStandardMaterial color={p.deskLeg} roughness={0.5} metalness={0.15} />
             </mesh>
           ))}
+          <Monitor position={[-1.15, 1.12, dz - side * .22]} rotation={side < 0 ? Math.PI : 0} workspaceName={workspaceName} tint={tint} p={p} />
+          <Monitor position={[1.15, 1.12, dz - side * .22]} rotation={side < 0 ? Math.PI : 0} workspaceName={workspaceName} tint={tint} p={p} />
+          {[-1.15, 1.15].map((accessoryX) => <DeskAccessories key={accessoryX} x={accessoryX} z={dz + side * .4} facing={side < 0 ? Math.PI : 0} p={p} />)}
         </Fragment>
-      ))}
+      )}))}
 
       {/* privacy screen down the middle — kept below head height on purpose */}
       <RoundedBox args={[4.2, 0.32, 0.07]} radius={0.02} smoothness={4} position={[0, 1.24, 0]} castShadow>
         <meshStandardMaterial color={screenTint} roughness={0.8} />
       </RoundedBox>
 
-      {/* Monitors sit inboard of the standing spots (x = ±1.15) so a screen is
-          never directly in front of an agent's head. */}
-      <Monitor position={[-1.15, 1.12, -0.4]} rotation={Math.PI} tint={tint} p={p} />
-      <Monitor position={[1.15, 1.12, -0.4]} rotation={Math.PI} tint={tint} p={p} />
-      <Monitor position={[-1.15, 1.12, 0.4]} tint={tint} p={p} />
-      <Monitor position={[1.15, 1.12, 0.4]} tint={tint} p={p} />
-
-      {[-1, 1].flatMap((side) => [-1.15, 1.15].map((x) => <DeskAccessories key={side + ':' + x} x={x} z={side * 1.02} facing={side < 0 ? Math.PI : 0} p={p} />))}
-      {/* Chairs are pushed back and outboard — as if the agents stood up to
-          work — so they never sit between the camera and a minifigure. */}
-      <Chair position={[-2.2, 0, -POD_CHAIR_Z]} rotation={0.35} p={p} />
-      <Chair position={[2.2, 0, -POD_CHAIR_Z]} rotation={-0.35} p={p} />
-      <Chair position={[-2.2, 0, POD_CHAIR_Z]} rotation={Math.PI - 0.35} p={p} />
-      <Chair position={[2.2, 0, POD_CHAIR_Z]} rotation={Math.PI + 0.35} p={p} />
+      {/* Every active teammate has a real chair, including dynamically-added rows. */}
+      {Array.from({ length: workstationRows }, (_, row) => row).flatMap((row) => [-1, 1].flatMap((side) => [-1.15, 1.15].map((chairX) => {
+        const chairZ = side * (POD_CHAIR_Z + row * 1.3)
+        return <Chair key={`${row}:${side}:${chairX}`} position={[chairX, 0, chairZ]} rotation={side > 0 ? Math.PI : 0} p={p} />
+      })))}
     </group>
   )
 }
@@ -175,14 +175,14 @@ function DeskPod({ zone, tint, p }: { zone: ZoneLayout; tint: string; p: ScenePa
 function Lounge({ zone, p }: { zone: ZoneLayout; p: ScenePalette }) {
   const [x, z] = zone.origin
   return <group position={[x, 0, z]}>
-    <group position={[0, 0, -1.2]}>
+    {Array.from({ length: Math.max(1, Math.ceil(zone.headcount / 3)) }, (_, row) => <group key={row} position={[0, 0, -1.2 + row * 1.75]}>
       <Block size={[4.8, 0.32, 0.86]} at={[0, 0.36, 0]} color={p.sofa} radius={0.12} />
       <Block size={[4.8, 0.62, 0.22]} at={[0, 0.66, -0.34]} color={p.sofaBack} radius={0.09} />
       {[-2.36, 2.36].map((lx) => <Block key={lx} size={[0.22, 0.5, 0.92]} at={[lx, 0.48, 0]} color={p.sofaBack} radius={0.08} />)}
       {[-1.55, 0, 1.55].map((lx) => <Block key={lx} size={[1.47, 0.13, 0.7]} at={[lx, 0.55, 0.03]} color={p.sofaBack} radius={0.05} />)}
       {[-2.1, 2.1].flatMap((lx) => [-0.28, 0.28].map((lz) => <Block key={lx + ':' + lz} size={[0.08, 0.24, 0.08]} at={[lx, 0.12, lz]} color={p.deskLeg} />))}
       {[-1.8, 1.8].map((lx) => <group key={lx} position={[lx, 0.78, -0.03]} rotation={[-0.2, 0, lx * 0.06]}><Block size={[0.46, 0.43, 0.15]} color={lx < 0 ? '#b18c64' : '#809b8d'} radius={0.065} /></group>)}
-    </group>
+    </group>)}
     <group position={[3.65, 0, 0.1]}>
       <mesh position={[0, 0.43, 0]} castShadow receiveShadow><cylinderGeometry args={[0.65, 0.65, 0.09, 40]} /><meshStandardMaterial color={p.deskTop} roughness={0.5} /></mesh>
       {[-0.36, 0.36].map((lx) => <Block key={lx} size={[0.07, 0.4, 0.55]} at={[lx, 0.2, 0]} color={p.deskLeg} />)}
@@ -191,16 +191,48 @@ function Lounge({ zone, p }: { zone: ZoneLayout; p: ScenePalette }) {
   </group>
 }
 
+function Cafeteria({ plan, p }: { plan: Floorplan; p: ScenePalette }) {
+  const [x, z] = cafeteriaOrigin(plan)
+  return <group position={[x, 0, z]} name="office-cafeteria">
+    <Rug width={5.8} depth={4.1} radius={0.65} color={themedTint('#d7b887', p, 0.28)} position={[0, 0.018, 0]} />
+    {/* Kitchenette: fridge, counter, sink, coffee machine and stocked shelves. */}
+    <Block size={[0.85, 2.0, 0.72]} at={[2.05, 1, -1.5]} color={p.mullion} radius={0.08} metal={0.25} />
+    <Block size={[0.06, 0.34, 0.035]} at={[1.7, 1.18, -1.12]} color={p.chairBase} radius={0.012} />
+    <Block size={[2.75, 0.78, 0.7]} at={[0.48, 0.39, -1.62]} color={p.sofaBack} radius={0.08} />
+    <Block size={[2.9, 0.09, 0.82]} at={[0.48, 0.82, -1.62]} color={p.deskTop} radius={0.035} />
+    <Block size={[0.68, 0.52, 0.48]} at={[1.58, 1.13, -1.58]} color="#343c43" radius={0.07} />
+    <Block size={[0.4, 0.16, 0.04]} at={[1.58, 1.15, -1.32]} color="#aab6b6" radius={0.02} />
+    <mesh position={[1.58, 0.9, -1.28]}><cylinderGeometry args={[0.05, 0.045, 0.11, 16]} /><meshStandardMaterial color="#d8c6aa" /></mesh>
+    <Block size={[0.72, 0.035, 0.48]} at={[-0.2, 0.87, -1.59]} color="#647b80" radius={0.04} metal={0.45} />
+    <mesh position={[-0.2, 1.05, -1.56]} rotation={[0, 0, Math.PI / 2]}><torusGeometry args={[0.14, 0.022, 8, 24, Math.PI]} /><meshStandardMaterial color={p.mullion} metalness={0.8} roughness={0.25} /></mesh>
+    {[-0.55, 0.25, 1.05].map((sx, index) => <group key={sx} position={[sx, 1.72, -1.84]}>
+      <Block size={[0.65, 0.05, 0.28]} color={p.deskTop} radius={0.015} />
+      {[0, 1, 2].map((jar) => <mesh key={jar} position={[-0.2 + jar * 0.2, 0.15, 0]}><cylinderGeometry args={[0.055, 0.055, 0.24, 12]} /><meshStandardMaterial color={['#a6b7a4', '#c8ad84', '#9ca9bb'][(index + jar) % 3]} roughness={0.5} /></mesh>)}
+    </group>)}
+    {/* Cafe table and four upholstered stools align with the break destinations. */}
+    <mesh position={[0, 0.7, 0.08]} castShadow receiveShadow><cylinderGeometry args={[0.78, 0.78, 0.1, 40]} /><meshStandardMaterial color={p.deskTop} roughness={0.55} /></mesh>
+    <mesh position={[0, 0.35, 0.08]} castShadow><cylinderGeometry args={[0.08, 0.12, 0.68, 16]} /><meshStandardMaterial color={p.deskLeg} metalness={0.45} roughness={0.35} /></mesh>
+    {[[-0.85, -0.55], [0.85, -0.55], [-0.85, 0.7], [0.85, 0.7]].map(([sx, sz], index) => <group key={index} position={[sx, 0, sz]}>
+      <mesh position={[0, 0.52, 0]} castShadow><cylinderGeometry args={[0.3, 0.3, 0.12, 24]} /><meshStandardMaterial color={index % 2 ? p.sofa : p.sofaBack} roughness={0.7} /></mesh>
+      <mesh position={[0, 0.26, 0]} castShadow><cylinderGeometry args={[0.045, 0.07, 0.48, 12]} /><meshStandardMaterial color={p.deskLeg} metalness={0.5} roughness={0.35} /></mesh>
+      <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><torusGeometry args={[0.18, 0.025, 8, 24]} /><meshStandardMaterial color={p.deskLeg} metalness={0.5} /></mesh>
+    </group>)}
+    <Html center position={[0, 2.3, -1.7]} style={{ pointerEvents: 'none' }}><div aria-hidden className="rounded-full border border-line bg-glass-strong px-4 py-1.5 text-xs font-bold uppercase tracking-[.14em] text-ink shadow-lg">Cafeteria · coffee & reset</div></Html>
+  </group>
+}
+
 function TeamZone({
   team,
   zone,
   headcount,
   p,
+  workspaceName,
 }: {
   team: Team
   zone: ZoneLayout
   headcount: number
   p: ScenePalette
+  workspaceName: string
 }) {
   const [x, z] = zone.origin
   const selected = useWorkspace((s) => s.selectedId)
@@ -216,7 +248,7 @@ function TeamZone({
         position={[x, 0.015, z]}
       />
 
-      {zone.kind === 'pod' ? <DeskPod zone={zone} tint={team.tint} p={p} /> : <Lounge zone={zone} p={p} />}
+      {zone.kind === 'pod' ? <DeskPod zone={zone} tint={team.tint} p={p} workspaceName={workspaceName} /> : <Lounge zone={zone} p={p} />}
 
       {/* Zone signage. drei's <Text> would pull a font over the network, so the
           label is plain DOM projected into the scene instead. */}
@@ -245,7 +277,7 @@ function TeamZone({
 
 /* -------------------------------- room -------------------------------- */
 
-function Room({ plan, p }: { plan: Floorplan; p: ScenePalette }) {
+function Room({ plan, p, workspaceName }: { plan: Floorplan; p: ScenePalette; workspaceName: string }) {
   const W = plan.room.width
   const D = plan.room.depth
   const backZ = Math.min(...Object.values(plan.zones).map((z) => z.origin[1])) - 4.6
@@ -266,7 +298,7 @@ function Room({ plan, p }: { plan: Floorplan; p: ScenePalette }) {
       {/* Low return walls preserve the view of the people and furniture. */}
       <Block size={[0.16, 0.72, D]} at={[side * W / 2, 0.36, centreZ]} color={p.wallSide} radius={0.035} />
     </group>)}
-    <ArchitecturalDetails width={W} back={backZ} p={p} />
+    <ArchitecturalDetails width={W} back={backZ} p={p} workspaceName={workspaceName} />
     {Object.values(plan.zones).filter((z) => z.kind === 'pod').map((z) => <group key={z.id} position={[z.origin[0], 3.55, z.origin[1]]}>
       <Block size={[3.8, 0.07, 0.15]} color="#3c4947" radius={0.025} />
       <mesh position={[0, -0.043, 0]} rotation={[Math.PI / 2, 0, 0]}><planeGeometry args={[3.65, 0.09]} /><meshBasicMaterial color="#fff1d2" side={THREE.DoubleSide} /></mesh>
@@ -280,6 +312,7 @@ function Room({ plan, p }: { plan: Floorplan; p: ScenePalette }) {
 export function Office() {
   const agents = useWorkspace((s) => s.agents)
   const teams = useWorkspace((s) => s.teams)
+  const workspaceName = useWorkspace((s) => s.profile.workspaceName || 'Workspace')
   const { plan } = useFloorplan()
   const p = useScenePalette()
   const counts = useMemo(() => teamHeadcount(agents, teams), [agents, teams])
@@ -289,12 +322,13 @@ export function Office() {
 
   return (
     <group>
-      <Room plan={plan} p={p} />
+      <Room plan={plan} p={p} workspaceName={workspaceName} />
       {teams.map((team) => {
         const zone = plan.zones[team.id]
         if (!zone) return null
-        return <TeamZone key={team.id} team={team} zone={zone} headcount={counts[team.id] ?? 0} p={p} />
+        return <TeamZone key={team.id} team={team} zone={zone} headcount={counts[team.id] ?? 0} p={p} workspaceName={workspaceName} />
       })}
+      <Cafeteria plan={plan} p={p} />
       <Plant position={[-halfW + 1.6, 0, backZ + 3]} p={p} />
       <Plant position={[halfW - 1.6, 0, backZ + 3]} p={p} />
       <Plant position={[-halfW + 1.9, 0, backZ + plan.room.depth - 4]} p={p} />

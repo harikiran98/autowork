@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFiles } from '../state/filesStore'
 import { completedTasks, useWorkspace } from '../state/workspaceStore'
-import { ROLE_BY_ID } from '../data/org'
 import { useAccentColor, usePillStyle } from '../theme/pill'
+import { WorkBoard } from './WorkBoard'
 
-export type DrawerTab = 'files' | 'outputs'
+export type DrawerTab = 'work' | 'files' | 'outputs'
 
-const formatBytes = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`)
+const formatBytes = (n: number) => n < 1024
+  ? `${n} B`
+  : n < 1024 * 1024
+    ? `${(n / 1024).toFixed(1)} KB`
+    : `${(n / (1024 * 1024)).toFixed(1)} MB`
 const formatTime = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString() : '')
+
+const KIND_LABEL = {
+  text: 'Text', document: 'Word', spreadsheet: 'Sheet', presentation: 'Slides', pdf: 'PDF',
+  image: 'Image', audio: 'Audio', video: 'Video', archive: 'Archive', binary: 'File',
+} as const
 
 /* -------------------------------- files ---------------------------------- */
 
@@ -41,9 +50,9 @@ function FilesTab() {
           dragging ? 'border-accent bg-surface-2' : 'border-line bg-surface/50'
         }`}
       >
-        <p className="text-sm font-semibold text-ink">Drop text or code files here</p>
+        <p className="text-sm font-semibold text-ink">Drop any file here</p>
         <p className="mt-1 text-xs text-ink-faint">
-          Kept privately in this browser, up to 512 KB each.
+          PDF, Word, sheets, slides, images, code and more · up to 10 MB each.
         </p>
         <button
           type="button"
@@ -80,6 +89,9 @@ function FilesTab() {
               className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-2.5"
             >
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{f.name}</span>
+              <span className="shrink-0 rounded-full bg-surface-2 px-2 py-1 text-[10px] font-semibold text-ink-soft">
+                {KIND_LABEL[f.kind]}
+              </span>
               <span className="shrink-0 text-xs text-ink-faint">{formatBytes(f.bytes)}</span>
               <button
                 type="button"
@@ -95,6 +107,9 @@ function FilesTab() {
           ))}
         </ul>
       )}
+      <p className="px-1 text-[11px] leading-relaxed text-ink-faint">
+        Files stay in this browser until attached to a task. Office documents are converted to readable text; PDFs and images keep their visual content. Provider support varies for unusual binary formats.
+      </p>
     </div>
   )
 }
@@ -103,8 +118,11 @@ function FilesTab() {
 
 function OutputsTab() {
   const agents = useWorkspace((s) => s.agents)
+  const teams = useWorkspace((s) => s.teams)
+  const teamJobs = useWorkspace((s) => s.teamJobs)
   const select = useWorkspace((s) => s.select)
   const results = completedTasks(agents)
+  const teamResults = teamJobs.filter((job) => job.status === 'done' || job.status === 'error')
   const pill = usePillStyle()
   const accent = useAccentColor()
   const [copied, setCopied] = useState<string | null>(null)
@@ -119,18 +137,62 @@ function OutputsTab() {
     }
   }
 
-  if (!results.length) {
+  if (!results.length && !teamResults.length) {
     return (
       <p className="px-1 py-6 text-center text-sm text-ink-faint">
-        No completed tasks yet. Assign tasks to an agent and press Run.
+        No completed work yet. Assign work to an agent or an entire team.
       </p>
     )
   }
 
   return (
     <div className="space-y-3">
+      {teamResults.map((job) => {
+        const team = teams.find((item) => item.id === job.teamId)
+        const body = job.finalOutput ?? job.error ?? ''
+        return (
+          <article key={job.id} className="rounded-3xl border border-line bg-surface p-4">
+            <header className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-2 text-sm font-bold text-ink">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: team?.tint ?? '#718096' }} />
+                {team?.name ?? 'Team'}
+              </span>
+              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(team?.tint ?? '#718096')}>
+                Collaborative delivery
+              </span>
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                style={pill(job.status === 'done' ? '#10b981' : '#f43f5e')}
+              >
+                {job.status === 'done' ? 'Lead approved' : 'Failed'}
+              </span>
+              <span className="ml-auto text-[11px] text-ink-faint">{formatTime(job.finishedAt)}</span>
+            </header>
+
+            <p className="mt-2.5 text-sm font-semibold text-ink">{job.brief}</p>
+            <p className="mt-1 text-[11px] text-ink-faint">
+              Requested format: {job.outputFormat} · {job.contributions.length} contributors · {job.reviewRound} review {job.reviewRound === 1 ? 'round' : 'rounds'}
+            </p>
+            {job.attachments.length > 0 && (
+              <p className="mt-1 text-[11px] text-ink-faint">Files: {job.attachments.join(', ')}</p>
+            )}
+            {job.outputFile && <p className="mt-1 text-[11px] font-semibold text-ok">Shared workspace file: {job.outputFile}</p>}
+
+            <p className="mt-2.5 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-line bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink">
+              {body}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => void copy(job.id, body)}
+              className="mt-2.5 rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-semibold text-ink-soft transition-colors hover:text-ink"
+            >
+              {copied === job.id ? 'Copied' : 'Copy team output'}
+            </button>
+          </article>
+        )
+      })}
       {results.map(({ agent, task }) => {
-        const role = ROLE_BY_ID[agent.roleId]
         const body = task.output ?? task.error ?? ''
         return (
           <article key={task.id} className="rounded-3xl border border-line bg-surface p-4">
@@ -140,11 +202,11 @@ function OutputsTab() {
                 onClick={() => select(agent.id)}
                 className="flex items-center gap-2 rounded-full px-1 text-sm font-bold text-ink transition-colors hover:text-accent"
               >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: accent(role.color) }} />
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: accent(agent.color) }} />
                 {agent.name}
               </button>
-              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(role.color)}>
-                {role.label}
+              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(agent.color)}>
+                {agent.roleName}
               </span>
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
@@ -207,6 +269,7 @@ export function WorkspaceDrawer({
   const agents = useWorkspace((s) => s.agents)
   const fileCount = useFiles((s) => s.files.length)
   const outputCount = completedTasks(agents).length
+  const teamJobs = useWorkspace((s) => s.teamJobs)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -217,8 +280,9 @@ export function WorkspaceDrawer({
   }, [onClose])
 
   const tabs: Array<{ id: DrawerTab; label: string; count: number }> = [
+    { id: 'work', label: 'Assign work', count: teamJobs.filter((job) => job.status !== 'done').length },
     { id: 'files', label: 'Files', count: fileCount },
-    { id: 'outputs', label: 'Outputs', count: outputCount },
+    { id: 'outputs', label: 'Outputs', count: outputCount + teamJobs.filter((job) => job.status === 'done' || job.status === 'error').length },
   ]
 
   return (
@@ -262,7 +326,7 @@ export function WorkspaceDrawer({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-        {tab === 'files' ? <FilesTab /> : <OutputsTab />}
+        {tab === 'work' ? <WorkBoard /> : tab === 'files' ? <FilesTab /> : <OutputsTab />}
       </div>
     </aside>
   )

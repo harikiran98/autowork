@@ -42,7 +42,9 @@ export function useAccentColor(): (hex: string) => string {
 export function useAvatarStyle(): (hex: string) => CSSProperties {
   const resolved = useTheme((s) => s.resolved)
   return (hex: string) => {
-    const backgroundColor = resolved === 'dark' ? mixHex(hex, '#ffffff', 0.82) : hex
+    // A 4% lift avoids the narrow middle-luminance band where neither white
+    // nor near-black text reaches 4.5:1 on colors such as violet and rose.
+    const backgroundColor = resolved === 'dark' ? mixHex(hex, '#ffffff', 0.82) : mixHex(hex, '#ffffff', 0.94)
     const value = backgroundColor.replace('#', '')
     const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255)
     const linear = channels.map((channel) =>

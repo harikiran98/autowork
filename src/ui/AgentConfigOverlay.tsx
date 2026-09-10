@@ -7,8 +7,8 @@ import {
   modelsFor,
   type ProviderId,
 } from '../data/llm-catalog'
-import { ROLES, ROLE_BY_ID } from '../data/org'
-import { useWorkspace, type Agent } from '../state/workspaceStore'
+import { BENCH_ID } from '../data/org'
+import { useWorkspace, type Agent, type Effort } from '../state/workspaceStore'
 import { useAccentColor, useAvatarStyle, usePillStyle } from '../theme/pill'
 import { TaskList } from './TaskList'
 
@@ -17,6 +17,7 @@ const STATUS_HEX: Record<Agent['status'], string> = {
   working: '#10b981',
   idle: '#8394ab',
   blocked: '#f43f5e',
+  break: '#d49a45',
 }
 
 /**
@@ -28,7 +29,7 @@ export function AgentConfigOverlay() {
   const selectedId = useWorkspace((s) => s.selectedId)
   const agent = useWorkspace((s) => s.agents.find((a) => a.id === s.selectedId))
   const select = useWorkspace((s) => s.select)
-  const setRole = useWorkspace((s) => s.setRole)
+  const setTeamLead = useWorkspace((s) => s.setTeamLead)
   const assignTeam = useWorkspace((s) => s.assignTeam)
   const setProvider = useWorkspace((s) => s.setProvider)
   const updateAgent = useWorkspace((s) => s.updateAgent)
@@ -51,7 +52,6 @@ export function AgentConfigOverlay() {
 
   if (!agent || !selectedId) return null
 
-  const role = ROLE_BY_ID[agent.roleId]
   const team = teams.find((t) => t.id === agent.teamId) ?? teams[0]
   const provider = PROVIDER_BY_ID[agent.provider]
 
@@ -80,12 +80,12 @@ export function AgentConfigOverlay() {
       <header className="panel-header-line relative shrink-0 px-5 pb-5 pt-5 sm:px-6 sm:pt-6">
         <div
           className="absolute inset-x-0 top-0 h-28 opacity-45"
-          style={{ background: `radial-gradient(120% 80% at 50% 0%, ${role.color}44 0%, transparent 70%)` }}
+          style={{ background: `radial-gradient(120% 80% at 50% 0%, ${agent.color}44 0%, transparent 70%)` }}
         />
         <div className="relative flex items-start gap-4">
           <div
             className="grid h-14 w-14 shrink-0 place-items-center rounded-[20px] text-lg font-bold shadow-lg"
-            style={{ ...avatar(role.color), boxShadow: `0 10px 24px -8px ${role.color}` }}
+            style={{ ...avatar(agent.color), boxShadow: `0 10px 24px -8px ${agent.color}` }}
           >
             {agent.name.slice(0, 2)}
           </div>
@@ -100,9 +100,10 @@ export function AgentConfigOverlay() {
               <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(team.tint)}>
                 {team.name}
               </span>
-              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(role.color)}>
-                {role.label}
+              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={pill(agent.color)}>
+                {agent.roleName}
               </span>
+              {agent.isTeamLead && <span className="rounded-full bg-accent-ring px-2.5 py-1 text-[11px] font-bold text-accent">Team lead</span>}
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize"
                 style={pill(STATUS_HEX[agent.status])}
@@ -153,38 +154,12 @@ export function AgentConfigOverlay() {
           <p className="mt-2.5 px-1 text-xs leading-relaxed text-ink-faint">{team.mission}</p>
         </section>
 
-        {/* Role */}
-        <section>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Role</h3>
-          <div className="space-y-2">
-            {ROLES.map((r) => {
-              const isActive = r.id === agent.roleId
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  aria-pressed={isActive}
-                  onClick={() => setRole(agent.id, r.id)}
-                  className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 ${
-                    isActive
-                      ? 'bg-surface shadow-md shadow-black/10 ring-2 ring-accent'
-                      : 'bg-surface/60 ring-1 ring-line hover:bg-surface hover:shadow-sm'
-                  }`}
-                >
-                  <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ background: accent(r.color) }} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-ink">{r.label}</span>
-                    <span className="mt-0.5 block truncate text-xs text-ink-faint">{r.blurb}</span>
-                  </span>
-                  {isActive && (
-                    <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m4.5 10.5 4 4 7-8" />
-                    </svg>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+        {/* Custom role */}
+        <section className="space-y-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Custom role</h3>
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-ink-soft">Role name</span><input value={agent.roleName} onChange={(e) => updateAgent(agent.id, { roleName: e.target.value })} className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-ink-soft">Role description</span><textarea rows={3} value={agent.roleDescription} onChange={(e) => updateAgent(agent.id, { roleDescription: e.target.value })} className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
+          {agent.teamId !== BENCH_ID && <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3"><input type="checkbox" checked={agent.isTeamLead} onChange={(e) => setTeamLead(agent.id, e.target.checked)} className="h-4 w-4 accent-[var(--color-accent)]" /><span className="text-sm font-semibold text-ink">Team lead and final reviewer</span></label>}
         </section>
 
         {/* Model */}
@@ -205,27 +180,13 @@ export function AgentConfigOverlay() {
             onChange={(v) => updateAgent(agent.id, { model: v })}
           />
 
-          {/* Temperature */}
+          {/* Effort */}
           <div>
-            <div className="mb-2 flex items-baseline justify-between">
-              <label htmlFor="temperature" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
-                Temperature
-              </label>
-              <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-ink-soft">
-                {agent.temperature.toFixed(2)}
-              </span>
+            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Effort</span>
+            <div className="grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1" role="group" aria-label="Reasoning effort">
+              {(['low', 'medium', 'high'] as Effort[]).map((effort) => <button key={effort} type="button" aria-pressed={agent.effort === effort} onClick={() => updateAgent(agent.id, { effort })} className={`rounded-xl px-2 py-2 text-xs font-bold capitalize transition-all ${agent.effort === effort ? 'bg-surface text-ink shadow-sm' : 'text-ink-faint hover:text-ink'}`}>{effort}</button>)}
             </div>
-            <input
-              id="temperature"
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={agent.temperature}
-              onChange={(e) => updateAgent(agent.id, { temperature: Number(e.target.value) })}
-              className="slider w-full"
-              style={{ ['--pct' as string]: `${agent.temperature * 100}%` }}
-            />
+            <p className="mt-2 px-1 text-[11px] leading-relaxed text-ink-faint">Low uses a smaller reasoning and output budget. High spends more tokens for complex work.</p>
           </div>
 
           {/* System prompt */}
@@ -258,12 +219,11 @@ export function AgentConfigOverlay() {
         <div className="flex gap-2.5">
           <button
             type="button"
-            onClick={() =>
-              updateAgent(agent.id, { status: agent.status === 'working' ? 'idle' : 'working' })
-            }
+            disabled={agent.status === 'working'}
+            onClick={() => updateAgent(agent.id, { status: agent.status === 'break' ? 'idle' : 'break' })}
             className="flex-1 rounded-[18px] bg-solid py-3 text-sm font-semibold text-on-solid shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
           >
-            {agent.status === 'working' ? 'Pause agent' : 'Deploy agent'}
+            {agent.status === 'working' ? 'Working…' : agent.status === 'break' ? 'Return to desk' : 'Take a break'}
           </button>
           <button
             type="button"

@@ -102,6 +102,10 @@ for (const scheme of ['light','dark']) {
     await page.getByLabel('Email address').fill(`${scheme}@autowork.local`)
     await page.locator('input[type="password"]').first().fill('contrast-test-password')
     await page.getByRole('button',{name:/Enter workspace/}).click()
+  await page.getByRole('dialog', { name: 'Create your workspace' }).waitFor()
+  await page.getByLabel('Your name').fill(`${scheme} reviewer`)
+  await page.getByLabel('Workspace name').fill(`${scheme} studio`)
+  await page.getByRole('dialog', { name: 'Create your workspace' }).getByRole('button', { name: 'Enter workspace' }).click()
   await page.waitForTimeout(3800)
   await page.screenshot({ path: SHOTS + `theme-${scheme}-default.png` })
 
