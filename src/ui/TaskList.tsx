@@ -7,6 +7,7 @@ import { pendingCount, useWorkspace, type Agent, type Task } from '../state/work
 const STATUS_LABEL: Record<Task['status'], string> = {
   pending: 'Queued',
   running: 'Running',
+  awaiting_approval: 'Awaiting your approval',
   done: 'Done',
   error: 'Failed',
 }
@@ -14,6 +15,7 @@ const STATUS_LABEL: Record<Task['status'], string> = {
 const STATUS_VAR: Record<Task['status'], string> = {
   pending: 'var(--color-neutral)',
   running: 'var(--color-accent)',
+  awaiting_approval: 'var(--color-accent)',
   done: 'var(--color-ok)',
   error: 'var(--color-warn)',
 }
@@ -83,8 +85,10 @@ function AttachmentPicker({ agentId, task }: { agentId: string; task: Task }) {
 function TaskRow({ agentId, task }: { agentId: string; task: Task }) {
   const removeTask = useWorkspace((s) => s.removeTask)
   const resetTask = useWorkspace((s) => s.resetTask)
+  const approveTask = useWorkspace((s) => s.approveTask)
+  const requestTaskRevision = useWorkspace((s) => s.requestTaskRevision)
   const [expanded, setExpanded] = useState(false)
-  const hasResult = task.status === 'done' || task.status === 'error'
+  const hasResult = task.status === 'awaiting_approval' || task.status === 'done' || task.status === 'error'
 
   return (
     <li className="rounded-2xl border border-line bg-surface/60 p-3">
@@ -118,6 +122,7 @@ function TaskRow({ agentId, task }: { agentId: string; task: Task }) {
 
       {hasResult && (
         <div className="mt-2.5 space-y-2">
+          {task.status === 'awaiting_approval' && <div className="rounded-2xl border border-accent/30 bg-accent-ring p-3"><p className="text-xs font-semibold text-ink">Draft ready. Review it before this agent learns from it.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => approveTask(agentId, task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve & learn</button><button type="button" onClick={() => requestTaskRevision(agentId, task.id)} className="rounded-full bg-surface px-3 py-1.5 text-[11px] font-bold text-ink-soft ring-1 ring-line">Request revision</button></div></div>}
           <div className="flex gap-2">
             <button
               type="button"
@@ -156,6 +161,7 @@ export function TaskList({ agent }: { agent: Agent }) {
   const addTask = useWorkspace((s) => s.addTask)
   const runAgentTasks = useWorkspace((s) => s.runAgentTasks)
   const isRunning = useWorkspace((s) => s.running.includes(agent.id))
+  const workspaceOnline = useWorkspace((s) => s.workspaceOnline)
   const refreshFiles = useFiles((s) => s.refresh)
   const health = useApiHealth()
   const [draft, setDraft] = useState('')
@@ -171,7 +177,8 @@ export function TaskList({ agent }: { agent: Agent }) {
   const keyMissing = health?.reachable === true && health.providers[agent.provider] === false
 
   let blocked: string | null = null
-  if (serverDown) blocked = 'Model gateway unavailable. Start "npm run dev" locally, or check the Netlify function deployment.'
+  if (!workspaceOnline) blocked = 'Workspace is shut down. Turn on the red power button to resume queued work with its saved memory.'
+  else if (serverDown) blocked = 'Model gateway unavailable. Start "npm run dev" locally, or check the Netlify function deployment.'
   else if (keyMissing) blocked = `No key for this provider. Add it to .env locally or to Netlify environment variables.`
   else if (health?.requiresAccess && !accessReady) blocked = 'This deployment is protected. Enter its access code to run model tasks.'
 

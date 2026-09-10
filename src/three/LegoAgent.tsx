@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, useCursor } from '@react-three/drei'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
-import { Minifigure } from './Minifigure'
+import { AgentFigure } from './Minifigure'
 import type { Seat } from '../data/org'
 import { useWorkspace, type Agent } from '../state/workspaceStore'
 import { useScenePalette } from '../theme/palette'
@@ -12,6 +12,13 @@ import { useMotion } from './motion'
 const FIGURE_SCALE = 1
 const COFFEE_INTERVAL_SECONDS = 30 * 60
 const COFFEE_STOP_SECONDS = 75
+/**
+ * Extra rise for a couch seat over a desk chair.
+ *
+ * The sofa's top cushion sits at 61.5cm and a desk chair's at 58cm, so this is
+ * just that 3.5cm difference — the seated drop itself lives in DetailedFigure.
+ */
+const BENCH_SEAT_LIFT = 0.035
 
 const STATUS_VAR: Record<Agent['status'], string> = {
   working: 'var(--color-ok)',
@@ -26,6 +33,9 @@ interface Props {
   seat: Seat
   breakSeat: Seat
   coffeeSeat: Seat
+  workflowSeat?: Seat
+  /** Furniture layout reflows carry already-seated managers with their cubicle. */
+  syncSeatMovement?: boolean
 }
 
 /**
@@ -33,7 +43,7 @@ interface Props {
  * re-renders the whole scene) and pushes selection up to the store, which is
  * what the 2D overlay outside the Canvas listens to.
  */
-export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
+export function OfficeAgent({ agent, seat, breakSeat, coffeeSeat, workflowSeat, syncSeatMovement = false }: Props) {
   const group = useRef<THREE.Group>(null)
   const [hovered, setHovered] = useState(false)
   // The spawn point is intentionally stable. When the store moves an agent to
@@ -46,12 +56,14 @@ export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
   const hover = useWorkspace((s) => s.hover)
   const showLabels = useWorkspace((s) => s.showLabels)
   const isSelected = useWorkspace((s) => s.selectedId === agent.id)
+  const workspaceOnline = useWorkspace((s) => s.workspaceOnline)
 
   const palette = useScenePalette()
   const target = useRef(new THREE.Vector3())
   const activityRing = useRef<THREE.Mesh>(null)
-  const motion = useRef({ distance: 0, speed: 0, pose: seat.pose, seatLift: seat.place === 'bench' ? 0.14 : 0, carryingCoffee: false })
+  const motion = useRef({ distance: 0, speed: 0, pose: seat.pose, seatLift: seat.place === 'bench' ? BENCH_SEAT_LIFT : 0, carryingCoffee: false })
   const time = useRef(0)
+  const previousSeat = useRef({ position: seat.position, sync: syncSeatMovement })
   // Stable per-agent phase: movement stays organic without jumping after a render.
   const phase = useMemo(
     () => [...agent.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) * 0.173,
@@ -62,10 +74,22 @@ export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
     [agent.id],
   )
 
+  useEffect(() => {
+    const previous = previousSeat.current
+    // A new team can widen the office and shift the entire management wing.
+    // Carry existing managers by exactly that layout delta, preserving their
+    // local walk offset. Newly promoted managers still walk to their cubicle.
+    if (group.current && previous.sync && syncSeatMovement && seat.place === 'desk') {
+      group.current.position.x += seat.position[0] - previous.position[0]
+      group.current.position.z += seat.position[2] - previous.position[2]
+    }
+    previousSeat.current = { position: seat.position, sync: syncSeatMovement }
+  }, [seat.position, seat.place, syncSeatMovement])
+
   useFrame((_, delta) => {
     const g = group.current
     if (!g) return
-    const paused = useMotion.getState().paused
+    const paused = useMotion.getState().paused || !workspaceOnline
     if (paused) { motion.current.speed = 0; return }
     time.current += Math.min(delta, 0.05)
     const t = time.current + phase
@@ -74,7 +98,11 @@ export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
     // The 75-second stop is long enough to cross the largest generated office,
     // pause at the machine, and walk back without turning around mid-aisle.
     const coffeeRun = agent.status === 'idle' && seat.place === 'desk' && !isSelected && coffeeCycle < COFFEE_STOP_SECONDS
-    const destination = agent.status === 'break' && seat.place !== 'bench' ? breakSeat : coffeeRun ? coffeeSeat : seat
+    // An explicit owner-requested break wins over workflow routing. Without
+    // this priority an agent could appear stuck in a meeting/cubicle.
+    const destination = agent.status === 'break'
+      ? (seat.place === 'bench' ? seat : breakSeat)
+      : workflowSeat ?? (coffeeRun ? coffeeSeat : seat)
     target.current.set(...destination.position)
     const beforeX = g.position.x
     const beforeZ = g.position.z
@@ -90,7 +118,7 @@ export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
     motion.current.speed = paused ? 0 : travelled / Math.max(delta, 0.001)
     const arrived = distance < 0.12
     motion.current.pose = arrived ? destination.pose : 'standing'
-    motion.current.seatLift = arrived && destination.place === 'bench' ? 0.14 : 0
+    motion.current.seatLift = arrived && destination.place === 'bench' ? BENCH_SEAT_LIFT : 0
     motion.current.carryingCoffee = seat.place === 'desk' && coffeeCycle >= 15 && coffeeCycle < 105
 
     // Shortest-path rotation toward the movement or workstation.
@@ -132,7 +160,7 @@ export function LegoAgent({ agent, seat, breakSeat, coffeeSeat }: Props) {
       </mesh>
 
       <group scale={FIGURE_SCALE}>
-        <Minifigure
+        <AgentFigure
           torsoColor={agent.color}
           legColor={palette.legColor}
           animate

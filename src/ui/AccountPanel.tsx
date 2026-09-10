@@ -11,8 +11,13 @@ export function AccountPanel({ user, firstRun = false, onClose }: { user: Autowo
   const [phone, setPhone] = useState(profile.phone)
 
   useEffect(() => {
-    if (!profile.email) updateProfile({ email: user.email })
-  }, [profile.email, updateProfile, user.email])
+    // Deliberately skipped during first run. Backfilling the email there would
+    // persist a profile whose workspaceName is still empty, and a stored-but-
+    // empty profile defeats hydrate()'s named fallback — so a reload before the
+    // dialog was submitted came back showing the generic label instead. First
+    // run writes the profile exactly once, on save, with every field present.
+    if (!firstRun && !profile.email) updateProfile({ email: user.email })
+  }, [firstRun, profile.email, updateProfile, user.email])
 
   const save = () => {
     if (!workspaceName.trim() || !ownerName.trim()) return

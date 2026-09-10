@@ -49,7 +49,12 @@ export function DetailedFigure({ torsoColor, legColor = '#415269', skinColor, ac
     const amount = Math.min(1, (motion?.current.speed ?? 0) / 0.45)
     const pose = gaitPose(motion?.current.distance ?? 0, amount)
     const seated = motion?.current.pose === 'seated' && amount < 0.15
-    if (body.current) body.current.position.y = (seated ? -0.28 + (motion?.current.seatLift ?? 0) : 0) + pose.bob
+    // Sitting drops the root so the pelvis lands on a cushion. The exact value
+    // is set by the legs, not by the seat: with the seated hip/knee angles
+    // below, a .28 drop pushed the shoes 6cm through the floor and buried the
+    // pelvis 5cm inside the chair. At .21 the soles rest on the floor and the
+    // pelvis sits on top of the 58cm chair cushion.
+    if (body.current) body.current.position.y = (seated ? -0.21 + (motion?.current.seatLift ?? 0) : 0) + pose.bob
     if (left.current) left.current.rotation.x = seated ? -1.18 : pose.left
     if (right.current) right.current.rotation.x = seated ? -1.18 : pose.right
     if (leftKnee.current) leftKnee.current.rotation.x = seated ? 1.34 : pose.leftKnee

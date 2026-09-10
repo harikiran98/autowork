@@ -31,7 +31,17 @@ export default function App({ user, onSignOut }: { user: AutoworkUser; onSignOut
 
   return (
     <main className="app-shell relative h-dvh w-screen overflow-hidden bg-canvas antialiased">
-      <div className={`scene-stage absolute inset-0 xl:left-[284px] ${hasSelection ? 'xl:right-[444px]' : ''}`}>
+      <div
+        className={`scene-stage absolute inset-0 xl:left-[284px] ${hasSelection ? 'xl:right-[444px]' : ''}`}
+        onDoubleClick={(event) => {
+          if (event.button !== 0) return
+          select(null)
+          // One reset path for both views. `motion.home()` bumps the shared
+          // resetView counter, which the office reframes on and the neural
+          // view's <CameraHome> restores from — neither remounts its canvas.
+          motion.home()
+        }}
+      >
         {view === 'office' ? <OfficeCanvas /> : <NeuralCanvas />}
       </div>
 
@@ -66,7 +76,7 @@ export default function App({ user, onSignOut }: { user: AutoworkUser; onSignOut
               </svg>
             </span>
             <span><span className="font-semibold text-ink">Select an agent</span> to open their command center</span>
-            <span className="hidden text-ink-faint sm:inline">· drag to orbit · scroll to zoom</span>
+            <span className="hidden text-ink-faint sm:inline">· drag to move · right-drag to orbit · scroll to zoom · double-click to reset</span>
           </div>
         </div>
       )}

@@ -4,9 +4,9 @@ import * as THREE from 'three'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { DetailedFigure, type FigureProps } from './DetailedFigure'
 
-export interface MinifigureProps extends FigureProps { modelUrl?: string }
+export interface AgentFigureProps extends FigureProps { modelUrl?: string }
 
-function GltfMinifigure({ modelUrl, torsoColor }: MinifigureProps & { modelUrl: string }) {
+function GltfAgentFigure({ modelUrl, torsoColor }: AgentFigureProps & { modelUrl: string }) {
   const { scene } = useGLTF(modelUrl)
 
   // useGLTF caches by URL, so every agent must render its own clone or they
@@ -34,14 +34,14 @@ function GltfMinifigure({ modelUrl, torsoColor }: MinifigureProps & { modelUrl: 
  * Public entry point. Renders the .glb when one is configured and falls back to
  * the procedural figure while it streams in (or if none is set at all).
  */
-export function Minifigure(props: MinifigureProps) {
+export function AgentFigure(props: AgentFigureProps) {
   if (!props.modelUrl) return <DetailedFigure {...props} />
   return (
     <Suspense fallback={<DetailedFigure {...props} />}>
-      <GltfMinifigure {...props} modelUrl={props.modelUrl} />
+      <GltfAgentFigure {...props} modelUrl={props.modelUrl} />
     </Suspense>
   )
 }
 
-/** Call at module scope for models you know you'll need: preloadMinifigure('/models/agent.glb') */
-export const preloadMinifigure = (url: string) => useGLTF.preload(url)
+/** Call at module scope for models you know you'll need: preloadAgentFigure('/models/agent.glb') */
+export const preloadAgentFigure = (url: string) => useGLTF.preload(url)

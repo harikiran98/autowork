@@ -122,7 +122,7 @@ function OutputsTab() {
   const teamJobs = useWorkspace((s) => s.teamJobs)
   const select = useWorkspace((s) => s.select)
   const results = completedTasks(agents)
-  const teamResults = teamJobs.filter((job) => job.status === 'done' || job.status === 'error')
+  const teamResults = teamJobs.filter((job) => job.status === 'awaiting_approval' || job.status === 'done' || job.status === 'error')
   const pill = usePillStyle()
   const accent = useAccentColor()
   const [copied, setCopied] = useState<string | null>(null)
@@ -162,9 +162,9 @@ function OutputsTab() {
               </span>
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                style={pill(job.status === 'done' ? '#10b981' : '#f43f5e')}
+                style={pill(job.status === 'done' ? '#10b981' : job.status === 'awaiting_approval' ? '#6172d9' : '#f43f5e')}
               >
-                {job.status === 'done' ? 'Lead approved' : 'Failed'}
+                {job.status === 'done' ? 'Owner approved' : job.status === 'awaiting_approval' ? 'Awaiting owner approval' : 'Failed'}
               </span>
               <span className="ml-auto text-[11px] text-ink-faint">{formatTime(job.finishedAt)}</span>
             </header>
@@ -210,9 +210,9 @@ function OutputsTab() {
               </span>
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                style={pill(task.status === 'done' ? '#10b981' : '#f43f5e')}
+                style={pill(task.status === 'done' ? '#10b981' : task.status === 'awaiting_approval' ? '#6172d9' : '#f43f5e')}
               >
-                {task.status === 'done' ? 'Done' : 'Failed'}
+                {task.status === 'done' ? 'Approved' : task.status === 'awaiting_approval' ? 'Awaiting approval' : 'Failed'}
               </span>
               <span className="ml-auto text-[11px] text-ink-faint">{formatTime(task.finishedAt)}</span>
             </header>
@@ -282,7 +282,7 @@ export function WorkspaceDrawer({
   const tabs: Array<{ id: DrawerTab; label: string; count: number }> = [
     { id: 'work', label: 'Assign work', count: teamJobs.filter((job) => job.status !== 'done').length },
     { id: 'files', label: 'Files', count: fileCount },
-    { id: 'outputs', label: 'Outputs', count: outputCount + teamJobs.filter((job) => job.status === 'done' || job.status === 'error').length },
+    { id: 'outputs', label: 'Outputs', count: outputCount + teamJobs.filter((job) => job.status === 'awaiting_approval' || job.status === 'done' || job.status === 'error').length },
   ]
 
   return (

@@ -170,7 +170,10 @@ const handleEvent = async (event, authenticated = true) => {
         effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium',
         maxTokens: Math.max(1, Math.min(8192, Number(maxTokens) || 2048)),
       })),
-      signal: AbortSignal.timeout(26000),
+      // Netlify synchronous functions currently allow 60 seconds. Keep a
+      // small response margin while giving slower high-effort models more
+      // than twice the previous 26-second window.
+      signal: AbortSignal.timeout(55000),
     })
     const data = await upstream.json().catch(() => ({}))
 
@@ -187,7 +190,8 @@ const handleEvent = async (event, authenticated = true) => {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed.'
-    return response(message.includes('timeout') ? 504 : 400, { error: message })
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || message.toLowerCase().includes('timeout'))
+    return response(timedOut ? 504 : 400, { error: timedOut ? 'This model did not finish within the 55-second hosted response window. Retry with lower effort or a faster model; your task remains available to re-run.' : message })
   }
 }
 

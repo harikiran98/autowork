@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo } from 'react'
 import { Html, RoundedBox } from '@react-three/drei'
 import * as THREE from 'three'
-import { cafeteriaOrigin, POD_CHAIR_Z, type Floorplan, type ZoneLayout } from '../data/layout'
-import type { Team } from '../data/org'
+import { cafeteriaOrigin, meetingRooms, POD_CHAIR_Z, type Floorplan, type ZoneLayout } from '../data/layout'
+import type { Seat, Team } from '../data/org'
 import { useWorkspace, teamHeadcount } from '../state/workspaceStore'
 import { useFloorplan } from '../state/useFloorplan'
 import { themedTint, useScenePalette, type ScenePalette } from '../theme/palette'
+import { useMotion } from './motion'
 
 import { useSurfaceTexture } from './materials'
 import { ArchitecturalDetails, Block, DeskAccessories } from './InteriorDetails'
@@ -86,7 +87,8 @@ function Monitor({
         <boxGeometry args={[0.045, 0.18, 0.045]} />
         <meshStandardMaterial color={p.deskLeg} roughness={0.5} />
       </mesh>
-      <RoundedBox args={[0.74, 0.46, 0.045]} radius={0.025} smoothness={4} position={[0, 0.35, 0]} castShadow>
+      {/* Radius stays below half the 45mm panel depth, or the shell inflates. */}
+      <RoundedBox args={[0.74, 0.46, 0.045]} radius={0.02} smoothness={4} position={[0, 0.35, 0]} castShadow>
         <meshStandardMaterial color={p.monitorShell} roughness={0.45} />
       </RoundedBox>
       <mesh position={[0, 0.35, 0.024]}>
@@ -116,17 +118,6 @@ function Chair({ position, rotation, p }: { position: [number, number, number]; 
   </group>
 }
 
-function Plant({ position, p }: { position: [number, number, number]; p: ScenePalette }) {
-  return <group position={position}>
-    <mesh position={[0, 0.26, 0]} castShadow receiveShadow><cylinderGeometry args={[0.25, 0.19, 0.52, 24]} /><meshStandardMaterial color={p.potColor} roughness={0.8} /></mesh>
-    <mesh position={[0, 0.525, 0]} rotation={[-Math.PI / 2, 0, 0]}><circleGeometry args={[0.22, 24]} /><meshStandardMaterial color="#443c30" /></mesh>
-    {Array.from({ length: 11 }, (_, i) => <group key={i} rotation={[0, i * 2.4, 0]}>
-      <mesh position={[0.06, 0.8 + (i % 3) * 0.16, 0]} rotation={[0, 0, -0.18 - (i % 3) * 0.15]} castShadow><cylinderGeometry args={[0.009, 0.015, 0.8, 6]} /><meshStandardMaterial color="#5d7650" /></mesh>
-      <mesh position={[0.19, 1.03 + (i % 3) * 0.17, 0]} rotation={[0, 0, -0.65]} scale={[0.13, 0.33, 0.055]} castShadow><sphereGeometry args={[1, 12, 10]} /><meshStandardMaterial color={p.foliage[i % 2]} roughness={0.7} /></mesh>
-    </group>)}
-  </group>
-}
-
 /* ------------------------------ team zone ------------------------------ */
 
 function DeskPod({ zone, tint, p, workspaceName }: { zone: ZoneLayout; tint: string; p: ScenePalette; workspaceName: string }) {
@@ -136,7 +127,7 @@ function DeskPod({ zone, tint, p, workspaceName }: { zone: ZoneLayout; tint: str
   const workstationRows = Math.max(1, Math.ceil(zone.headcount / 4))
 
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, 0, z]} name={`desk-pod-${zone.id}`}>
       {/* Each group of four teammates gets a complete back-to-back desk row.
           This keeps dynamically-added agents seated at real workstations. */}
       {Array.from({ length: workstationRows }, (_, row) => row).flatMap((row) => [-1, 1].map((side) => {
@@ -175,11 +166,15 @@ function DeskPod({ zone, tint, p, workspaceName }: { zone: ZoneLayout; tint: str
 function Lounge({ zone, p }: { zone: ZoneLayout; p: ScenePalette }) {
   const [x, z] = zone.origin
   return <group position={[x, 0, z]}>
-    {Array.from({ length: Math.max(1, Math.ceil(zone.headcount / 3)) }, (_, row) => <group key={row} position={[0, 0, -1.2 + row * 1.75]}>
-      <Block size={[4.8, 0.32, 0.86]} at={[0, 0.36, 0]} color={p.sofa} radius={0.12} />
+    {Array.from({ length: Math.max(1, Math.ceil(zone.headcount / 3)) }, (_, row) => <group key={row} name={`lounge-sofa-${row}`} position={[0, 0, -1.2 + row * 1.75]}>
+      {/* Seating surface only, grouped so the scene audit can assert that a
+          seated character's thighs and shins clear it instead of sinking in. */}
+      <group name={`lounge-cushions-${row}`}>
+        <Block size={[4.8, 0.32, 0.86]} at={[0, 0.36, 0]} color={p.sofa} radius={0.12} />
+        {[-1.55, 0, 1.55].map((lx) => <Block key={lx} size={[1.47, 0.13, 0.7]} at={[lx, 0.55, 0.03]} color={p.sofaBack} radius={0.05} />)}
+      </group>
       <Block size={[4.8, 0.62, 0.22]} at={[0, 0.66, -0.34]} color={p.sofaBack} radius={0.09} />
       {[-2.36, 2.36].map((lx) => <Block key={lx} size={[0.22, 0.5, 0.92]} at={[lx, 0.48, 0]} color={p.sofaBack} radius={0.08} />)}
-      {[-1.55, 0, 1.55].map((lx) => <Block key={lx} size={[1.47, 0.13, 0.7]} at={[lx, 0.55, 0.03]} color={p.sofaBack} radius={0.05} />)}
       {[-2.1, 2.1].flatMap((lx) => [-0.28, 0.28].map((lz) => <Block key={lx + ':' + lz} size={[0.08, 0.24, 0.08]} at={[lx, 0.12, lz]} color={p.deskLeg} />))}
       {[-1.8, 1.8].map((lx) => <group key={lx} position={[lx, 0.78, -0.03]} rotation={[-0.2, 0, lx * 0.06]}><Block size={[0.46, 0.43, 0.15]} color={lx < 0 ? '#b18c64' : '#809b8d'} radius={0.065} /></group>)}
     </group>)}
@@ -217,7 +212,7 @@ function Cafeteria({ plan, p }: { plan: Floorplan; p: ScenePalette }) {
       <mesh position={[0, 0.26, 0]} castShadow><cylinderGeometry args={[0.045, 0.07, 0.48, 12]} /><meshStandardMaterial color={p.deskLeg} metalness={0.5} roughness={0.35} /></mesh>
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><torusGeometry args={[0.18, 0.025, 8, 24]} /><meshStandardMaterial color={p.deskLeg} metalness={0.5} /></mesh>
     </group>)}
-    <Html center position={[0, 2.3, -1.7]} style={{ pointerEvents: 'none' }}><div aria-hidden className="rounded-full border border-line bg-glass-strong px-4 py-1.5 text-xs font-bold uppercase tracking-[.14em] text-ink shadow-lg">Cafeteria · coffee & reset</div></Html>
+    <Html center position={[0, 2.15, -1.7]} style={{ pointerEvents: 'none' }}><div aria-hidden className="whitespace-nowrap rounded-full border border-line bg-glass-strong px-3 py-1 text-[9px] font-bold tracking-[.08em] text-ink shadow-md"><span className="uppercase">Cafeteria</span><span className="ml-1.5 font-medium normal-case tracking-normal text-ink-faint">coffee & reset</span></div></Html>
   </group>
 }
 
@@ -238,7 +233,7 @@ function TeamZone({
   const selected = useWorkspace((s) => s.selectedId)
 
   return (
-    <group>
+    <group name={`team-zone-${team.id}`} onClick={(event) => { event.stopPropagation(); useWorkspace.getState().select(null); useMotion.getState().focus([x, 1, z]) }}>
       {/* rug — keeps the "no sharp edges" language on the floor too */}
       <Rug
         width={zone.rug[0]}
@@ -277,6 +272,51 @@ function TeamZone({
 
 /* -------------------------------- room -------------------------------- */
 
+function ManagerCubicles({ agents, seats, p, workspaceName }: { agents: ReturnType<typeof useWorkspace.getState>['agents']; seats: Record<string, Seat>; p: ScenePalette; workspaceName: string }) {
+  const managers = agents.filter((agent) => agent.isTeamLead || agents.some((child) => child.parentAgentId === agent.id))
+  return <group name="manager-cubicles">{managers.map((agent) => {
+    const seat = seats[agent.id]
+    if (!seat || seat.place === 'bench') return null
+    return <group key={agent.id} name={`cubicle-${agent.id}`} position={seat.position} rotation={[0, seat.rotation, 0]} onClick={(event) => { event.stopPropagation(); useWorkspace.getState().select(agent.id); useMotion.getState().focus([seat.position[0], 1, seat.position[2]]) }}>
+      <RoundedBox args={[1.8, 1.52, .1]} radius={.045} smoothness={4} position={[0, .78, -.8]} castShadow><meshStandardMaterial color={p.sofaBack} roughness={.78} /></RoundedBox>
+      {[-1, 1].map((side) => <RoundedBox key={side} args={[.1, 1.52, 1.7]} radius={.045} smoothness={4} position={[side * .85, .78, 0]} castShadow><meshStandardMaterial color={p.sofa} roughness={.8} /></RoundedBox>)}
+      {/* The corner radius must stay under half the thinnest dimension. At the
+          old .08 on a 45mm mat, RoundedBox over-extruded it into a 34cm slab
+          that sank through the floor and stepped up under the chair. */}
+      <RoundedBox args={[1.82, .045, 1.72]} radius={.02} smoothness={4} position={[0, .025, 0]} receiveShadow><meshStandardMaterial color={p.rugMix > .2 ? p.ceilingPanel : p.wallSide} roughness={.95} /></RoundedBox>
+      <RoundedBox args={[1.5, .09, .68]} radius={.04} smoothness={4} position={[0, 1.04, .52]} castShadow receiveShadow><meshStandardMaterial color={p.deskTop} roughness={.58} /></RoundedBox>
+      {[-.58, .58].map((x) => <Block key={x} size={[.06, 1, .34]} at={[x, .52, .54]} color={p.deskLeg} radius={.018} />)}
+      <Monitor position={[0, 1.08, .51]} rotation={Math.PI} workspaceName={workspaceName} tint={agent.color} p={p} />
+      <Chair position={[0, 0, 0]} rotation={seat.rotation} p={p} />
+      <Html center distanceFactor={6} position={[0, 1.72, -.81]} style={{ pointerEvents: 'none' }}><div aria-hidden className="whitespace-nowrap rounded-full border border-line bg-glass-strong px-2.5 py-1 text-[9px] font-bold text-ink shadow-md">{agent.name} · {agent.isTeamLead ? 'team lead' : 'manager'}</div></Html>
+    </group>
+  })}</group>
+}
+
+function MeetingRooms({ plan, teams, p }: { plan: Floorplan; teams: Team[]; p: ScenePalette }) {
+  const jobs = useWorkspace((state) => state.teamJobs)
+  const rooms = meetingRooms(plan, teams)
+  return <group name="meeting-room-wing">{rooms.map((room) => {
+    const team = room.teamId ? teams.find((item) => item.id === room.teamId) : undefined
+    const active = Boolean(team && jobs.some((job) => job.teamId === team.id && (job.status === 'planning' || job.status === 'delegated')))
+    const label = active && team ? team.name : room.defaultName
+    return <group key={room.id} name={room.id} position={[room.position[0], 0, room.position[1]]} onClick={(event) => { event.stopPropagation(); useWorkspace.getState().select(null); useMotion.getState().focus([room.position[0], 1, room.position[1]]) }}>
+      <Rug width={3.25} depth={3.25} radius={.28} color={themedTint(team?.tint ?? '#9ca9bb', p, .2)} position={[0, .018, 0]} />
+      <RoundedBox args={[3.3, 1.35, .07]} radius={.035} smoothness={4} position={[0, .7, -1.58]} castShadow><meshPhysicalMaterial color={p.window} transparent opacity={.54} roughness={.2} /></RoundedBox>
+      {[-1, 1].map((side) => <RoundedBox key={side} args={[.07, 1.35, 3.2]} radius={.035} smoothness={4} position={[side * 1.62, .7, 0]} castShadow><meshPhysicalMaterial color={p.window} transparent opacity={.42} roughness={.22} /></RoundedBox>)}
+      <mesh position={[0, .72, 0]} castShadow receiveShadow><cylinderGeometry args={[.73, .73, .09, 40]} /><meshStandardMaterial color={p.deskTop} roughness={.55} /></mesh>
+      <mesh position={[0, .36, 0]} castShadow><cylinderGeometry args={[.08, .12, .7, 16]} /><meshStandardMaterial color={p.deskLeg} metalness={.35} roughness={.4} /></mesh>
+      {Array.from({ length: 6 }, (_, chair) => {
+        const angle = chair / 6 * Math.PI * 2
+        return <Chair key={chair} position={[Math.cos(angle) * .92, 0, Math.sin(angle) * .78]} rotation={Math.atan2(-Math.cos(angle), -Math.sin(angle))} p={p} />
+      })}
+      <Html center distanceFactor={7} position={[0, 1.72, -1.56]} style={{ pointerEvents: 'none' }}><div aria-hidden className={`whitespace-nowrap rounded-full border px-3 py-1 text-[9px] font-bold shadow-md ${active ? 'border-accent bg-solid text-on-solid' : 'border-line bg-glass-strong text-ink-soft'}`}>{active ? `${label} · meeting` : label}</div></Html>
+      {active && <mesh position={[0, .04, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[1.3, 1.38, 48]} /><meshBasicMaterial color={team?.tint ?? '#8fd6a6'} transparent opacity={.6} /></mesh>}
+      <pointLight color={p.keyColor} intensity={active ? 5 : 2.5} distance={5} position={[0, 2.7, 0]} />
+    </group>
+  })}</group>
+}
+
 function Room({ plan, p, workspaceName }: { plan: Floorplan; p: ScenePalette; workspaceName: string }) {
   const W = plan.room.width
   const D = plan.room.depth
@@ -284,7 +324,9 @@ function Room({ plan, p, workspaceName }: { plan: Floorplan; p: ScenePalette; wo
   const centreZ = backZ + D / 2
   const wood = useSurfaceTexture('oak')
   return <group>
-    <RoundedBox args={[W, 0.22, D]} radius={0.1} position={[0, -0.115, centreZ]} receiveShadow>
+    {/* Named so the scene audit can assert every wing stays on the floor
+        instead of hanging over an edge as the room grows. */}
+    <RoundedBox name="office-floor" args={[W, 0.22, D]} radius={0.1} position={[0, -0.115, centreZ]} receiveShadow>
       <meshStandardMaterial map={wood} color={p.floor} roughness={0.68} />
     </RoundedBox>
     <Block size={[W, 3.8, 0.16]} at={[0, 1.9, backZ]} color={p.wallBack} radius={0.03} />
@@ -313,12 +355,9 @@ export function Office() {
   const agents = useWorkspace((s) => s.agents)
   const teams = useWorkspace((s) => s.teams)
   const workspaceName = useWorkspace((s) => s.profile.workspaceName || 'Workspace')
-  const { plan } = useFloorplan()
+  const { plan, seats } = useFloorplan()
   const p = useScenePalette()
   const counts = useMemo(() => teamHeadcount(agents, teams), [agents, teams])
-
-  const halfW = plan.room.width / 2
-  const backZ = Math.min(...Object.values(plan.zones).map((z) => z.origin[1])) - 4.4
 
   return (
     <group>
@@ -328,11 +367,9 @@ export function Office() {
         if (!zone) return null
         return <TeamZone key={team.id} team={team} zone={zone} headcount={counts[team.id] ?? 0} p={p} workspaceName={workspaceName} />
       })}
+      <ManagerCubicles agents={agents} seats={seats} p={p} workspaceName={workspaceName} />
+      <MeetingRooms plan={plan} teams={teams} p={p} />
       <Cafeteria plan={plan} p={p} />
-      <Plant position={[-halfW + 1.6, 0, backZ + 3]} p={p} />
-      <Plant position={[halfW - 1.6, 0, backZ + 3]} p={p} />
-      <Plant position={[-halfW + 1.9, 0, backZ + plan.room.depth - 4]} p={p} />
-      <Plant position={[halfW - 1.9, 0, backZ + plan.room.depth - 4]} p={p} />
     </group>
   )
 }

@@ -5,7 +5,7 @@ import { completedTasks, useWorkspace } from '../state/workspaceStore'
 
 const STAGE_LABEL = {
   queued: 'Ready to start', planning: 'Lead is planning', delegated: 'Team is collaborating',
-  reviewing: 'Lead quality review', revising: 'Revisions in progress', done: 'Delivered', error: 'Needs attention',
+  reviewing: 'Lead quality review', revising: 'Revisions in progress', awaiting_approval: 'Waiting for your approval', done: 'Delivered', error: 'Needs attention',
 } as const
 
 export function WorkBoard() {
@@ -17,6 +17,13 @@ export function WorkBoard() {
   const createTeamJob = useWorkspace((state) => state.createTeamJob)
   const runTeamJob = useWorkspace((state) => state.runTeamJob)
   const removeTeamJob = useWorkspace((state) => state.removeTeamJob)
+  const approveTask = useWorkspace((state) => state.approveTask)
+  const requestTaskRevision = useWorkspace((state) => state.requestTaskRevision)
+  const approveTeamJob = useWorkspace((state) => state.approveTeamJob)
+  const requestTeamRevision = useWorkspace((state) => state.requestTeamRevision)
+  const skipApprovals = useWorkspace((state) => state.skipApprovals)
+  const setSkipApprovals = useWorkspace((state) => state.setSkipApprovals)
+  const workspaceOnline = useWorkspace((state) => state.workspaceOnline)
   const files = useFiles((state) => state.files)
   const availableTeams = useMemo(() => teams.filter((team) => team.id !== BENCH_ID && agents.some((agent) => agent.teamId === team.id)), [agents, teams])
   const [mode, setMode] = useState<'individual' | 'team'>('individual')
@@ -41,7 +48,7 @@ export function WorkBoard() {
   }
 
   const submit = async () => {
-    if (!brief.trim() || !effectiveTarget) return
+    if (!workspaceOnline || !brief.trim() || !effectiveTarget) return
     setStarting(true)
     try {
       if (mode === 'individual') {
@@ -61,8 +68,12 @@ export function WorkBoard() {
       <div className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-2 p-1" role="group" aria-label="Assignment type">
         {(['individual', 'team'] as const).map((value) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => { setMode(value); setTarget('') }} className={`rounded-xl px-3 py-2 text-xs font-bold capitalize transition-all ${mode === value ? 'bg-surface text-ink shadow-sm' : 'text-ink-faint hover:text-ink'}`}>{value === 'individual' ? 'Individual agent' : 'Entire team'}</button>)}
       </div>
+      <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3"><input type="checkbox" checked={skipApprovals} onChange={(event) => setSkipApprovals(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]" /><span><span className="block text-xs font-bold text-ink">Skip my approval</span><span className="mt-0.5 block text-[11px] leading-relaxed text-ink-faint">Off by default. When off, drafts wait for you before they become outputs, shared files, or learning memory.</span></span></label>
 
-      <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Assign to</span><select aria-label="Assign to" value={effectiveTarget} onChange={(event) => setTarget(event.target.value)} className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring">{targets.map((item) => <option key={item.id} value={item.id}>{item.name}{'roleName' in item ? ` — ${item.roleName}` : ` — ${agents.filter((agent) => agent.teamId === item.id).length} members`}</option>)}</select></label>
+      <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Assign to</span><select aria-label="Assign to" value={effectiveTarget} onChange={(event) => setTarget(event.target.value)} className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring">{targets.map((item) => {
+        const parent = 'roleName' in item && item.parentAgentId ? agents.find((agent) => agent.id === item.parentAgentId) : undefined
+        return <option key={item.id} value={item.id}>{item.name}{'roleName' in item ? ` — ${item.roleName}${parent ? ` · sub-agent of ${parent.name}` : ''}` : ` — ${agents.filter((agent) => agent.teamId === item.id).length} members`}</option>
+      })}</select></label>
       {mode === 'team' && effectiveTarget && <p className="mt-2 rounded-2xl bg-accent-ring px-3.5 py-2.5 text-[11px] leading-relaxed text-ink-soft">The team lead plans the split, every member contributes, junior work is reviewed, and unsatisfactory work is automatically returned for revision before final delivery.</p>}
 
       <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Work brief</span><textarea aria-label="Work brief" rows={4} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the result you need, constraints, audience and success criteria…" className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
@@ -70,15 +81,17 @@ export function WorkBoard() {
 
       {files.length > 0 && <div className="mt-4"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Files</span><div className="flex flex-wrap gap-2">{files.map((file) => <button key={file.name} type="button" aria-pressed={attachments.includes(file.name)} onClick={() => toggleFile(file.name)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition-all ${attachments.includes(file.name) ? 'bg-solid text-on-solid ring-transparent' : 'bg-surface text-ink-soft ring-line hover:text-ink'}`}>{file.name}</button>)}</div></div>}
 
-      <button type="button" onClick={() => void submit()} disabled={starting || !brief.trim() || !effectiveTarget} className="mt-5 w-full rounded-2xl bg-solid py-3 text-sm font-bold text-on-solid shadow-lg transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0">{starting ? (mode === 'team' ? 'Team workflow running…' : 'Agent working…') : 'Assign & start'}</button>
+      {!workspaceOnline && <p className="mt-4 rounded-2xl border border-[#d5525f]/30 bg-[#d5525f]/10 px-3.5 py-2.5 text-xs font-semibold text-ink">Workspace is shut down. Your queues and agent memory are preserved.</p>}
+      <button type="button" onClick={() => void submit()} disabled={!workspaceOnline || starting || !brief.trim() || !effectiveTarget} className="mt-5 w-full rounded-2xl bg-solid py-3 text-sm font-bold text-on-solid shadow-lg transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0">{starting ? (mode === 'team' ? 'Team workflow running…' : 'Agent working…') : workspaceOnline ? 'Assign & start' : 'Workspace is off'}</button>
     </section>
 
     {latestIndividual && <section>
       <h3 className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Latest individual delivery</h3>
       <article className="rounded-[22px] border border-line bg-surface p-4">
-        <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold text-ink">{latestIndividual.agent.name}</span><span className="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-ink-soft">{latestIndividual.agent.roleName}</span><span className={`ml-auto text-[11px] font-bold ${latestIndividual.task.status === 'done' ? 'text-ok' : 'text-warn'}`}>{latestIndividual.task.status === 'done' ? 'Delivered' : 'Needs attention'}</span></div>
+        <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold text-ink">{latestIndividual.agent.name}</span><span className="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-ink-soft">{latestIndividual.agent.roleName}</span><span className={`ml-auto text-[11px] font-bold ${latestIndividual.task.status === 'done' ? 'text-ok' : latestIndividual.task.status === 'awaiting_approval' ? 'text-accent' : 'text-warn'}`}>{latestIndividual.task.status === 'done' ? 'Delivered' : latestIndividual.task.status === 'awaiting_approval' ? 'Awaiting approval' : 'Needs attention'}</span></div>
         <p className="mt-2 text-xs font-semibold text-ink">{latestIndividual.task.text}</p>
         <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-2xl bg-surface-2 p-3 font-sans text-xs leading-relaxed text-ink">{latestIndividual.task.output ?? latestIndividual.task.error}</pre>
+        {latestIndividual.task.status === 'awaiting_approval' && <div className="mt-3 flex gap-2"><button type="button" onClick={() => approveTask(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve & learn</button><button type="button" onClick={() => requestTaskRevision(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-bold text-ink-soft">Request revision</button></div>}
         <div className="mt-2 flex items-center justify-between gap-2"><span className="truncate text-[10px] text-ink-faint">{latestIndividual.task.outputFormat}</span><button type="button" onClick={() => void copyLatest()} className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-[10px] font-bold text-ink-soft hover:text-ink">{copied ? 'Copied' : 'Copy output'}</button></div>
       </article>
     </section>}
@@ -88,7 +101,8 @@ export function WorkBoard() {
       const done = job.contributions.filter((item) => item.status === 'done').length
       return <article key={job.id} className="rounded-[22px] border border-line bg-surface p-4">
         <div className="flex items-start gap-3"><span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${job.status === 'done' ? 'bg-ok' : job.status === 'error' ? 'bg-warn' : 'bg-accent'}`} /><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-bold text-ink">{job.brief}</p><p className="mt-1 text-[11px] text-ink-faint">{team?.name} · {STAGE_LABEL[job.status]} · {done}/{job.contributions.length} contributions{job.reviewRound ? ` · review ${job.reviewRound}` : ''}</p></div><button type="button" onClick={() => removeTeamJob(job.id)} aria-label="Remove team assignment" className="rounded-full px-2 py-1 text-xs text-ink-faint hover:bg-surface-2 hover:text-ink">×</button></div>
-        {job.status === 'queued' && <button type="button" onClick={() => void runTeamJob(job.id)} className="mt-3 rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Start workflow</button>}
+        {job.status === 'queued' && <button type="button" disabled={!workspaceOnline} onClick={() => void runTeamJob(job.id)} className="mt-3 rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid disabled:cursor-not-allowed disabled:opacity-45">{workspaceOnline ? 'Start workflow' : 'Workspace is off'}</button>}
+        {job.status === 'awaiting_approval' && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void approveTeamJob(job.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve, share & learn</button><button type="button" onClick={() => requestTeamRevision(job.id)} className="rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-bold text-ink-soft">Request another revision</button></div>}
         {job.error && <p className="mt-3 rounded-xl bg-warn/10 px-3 py-2 text-xs text-warn">{job.error}</p>}
         {job.outputFile && <p className="mt-3 rounded-xl bg-ok/10 px-3 py-2 text-[11px] font-semibold text-ink-soft">Shared with every team as <span className="text-ink">{job.outputFile}</span></p>}
         {job.outputFileError && <p className="mt-3 rounded-xl bg-warn/10 px-3 py-2 text-[11px] text-warn">Delivery completed, but its shared file could not be created: {job.outputFileError}</p>}

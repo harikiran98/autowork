@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 
 const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-export const useMotion = create<{ paused: boolean; toggle: () => void; resetView: number; home: () => void }>((set) => ({
+export const useMotion = create<{ paused: boolean; toggle: () => void; resetView: number; focusTarget: [number, number, number] | null; focus: (target: [number, number, number] | null) => void; home: () => void }>((set) => ({
   paused: reduced,
   toggle: () => set((s) => ({ paused: !s.paused })),
   resetView: 0,
-  home: () => set((s) => ({ resetView: s.resetView + 1 })),
+  focusTarget: null,
+  focus: (focusTarget) => set((s) => ({ focusTarget, resetView: s.resetView + 1 })),
+  home: () => set((s) => ({ focusTarget: null, resetView: s.resetView + 1 })),
 }))
 
 // All animation is relative to these authored joint origins, never world zero.

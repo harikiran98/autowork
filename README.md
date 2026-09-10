@@ -7,16 +7,27 @@ Vite, with local and Netlify serverless model gateways.
 
 The interface has invite-only Netlify Identity login, personal workspace setup,
 free-form agent roles, individual and reviewed team assignments, switchable
-office/neural-network views, per-user persistence, broad file support, softened
+office/neural-network views, recursive sub-agent hierarchies, approval-gated
+learning, per-user persistence, broad file support, softened
 light/dark themes, and a Netlify-ready production configuration.
 
 The office includes seated desk pods, ergonomic chairs, oak flooring, monitor UI,
 desk accessories, a furnished bench lounge, a complete cafeteria/coffee area,
-plants, and autowork architectural signage. Characters have independently
+plants, and workspace-name architectural signage. Characters have independently
 animated hips, knees, arms, and elbows. They sit at workstations, walk for coffee
 when idle, walk to the cafeteria on a break, and physically travel to the Bench
-before sitting on its couch. Motion can be paused and uses actual travel distance
-to drive the walking cycle.
+before sitting on the front of its couch without intersecting the cushions. Idle
+coffee trips are staggered and never occur more frequently than once every 30
+minutes per agent. Motion can be paused and uses actual travel distance to drive
+the walking cycle.
+
+The floorplan also includes a dynamically-sized meeting wing (one room per
+active team plus two flex rooms) and a separate management wing. Team leads and
+agents with direct reports move into dedicated, well-spaced cubicles. Team
+planning brings the involved agents into the team's temporarily named meeting
+room, and completed contributions travel through manager cubicles for review.
+Click a pod, cubicle, or meeting room to focus it; left-drag pans freely,
+right-drag orbits, and the room expands as teams and manager rows are added.
 
 ## Install on Windows
 
@@ -97,6 +108,11 @@ when that task is run.
 Adding a provider means one entry in the `PROVIDERS` map in `server/index.mjs`
 plus one in `src/data/llm-catalog.ts`.
 
+Hosted model requests allow up to 55 seconds (inside Netlify's 60-second
+synchronous function limit). If a frontier model still exceeds that window,
+the task remains re-runnable and the UI recommends lower effort or a faster
+model instead of returning an unexplained timeout.
+
 ## Run it (any platform)
 
 ```bash
@@ -120,7 +136,7 @@ variables, access-code protection, deployment checks, and custom-domain setup.
 
 There is exactly one bridge between the `<Canvas>` and the DOM chrome: the
 zustand store in `src/state/workspaceStore.ts`. Nothing is passed as props
-across the boundary, so a click on a minifigure and a click in the roster rail
+across the boundary, so a click on a human office avatar and a click in the roster rail
 take the same path.
 
 ```
@@ -128,7 +144,7 @@ App.tsx                     relative container
 ├── <OfficeCanvas/>         full-bleed WebGL
 │   ├── Lighting            key + hemisphere + fills, PCSS soft shadows
 │   ├── Office              room, team zones, desks, props
-│   ├── LegoAgent × N       clickable minifigures  ── select(id) ──┐
+│   ├── OfficeAgent × N     clickable human avatars ── select(id) ──┐
 │   └── CameraRig           eases orbit target to the selection    │
 ├── <TopBar/>                                                      │
 ├── <RosterRail/>           2D way into the same selection ────────┤
@@ -137,13 +153,13 @@ App.tsx                     relative container
 
 ## Swapping in real .glb models
 
-`src/three/Minifigure.tsx` exposes one component with two implementations
+`src/three/Minifigure.tsx` exposes one agent-figure component with two implementations
 behind the same props. Drop a file in `public/models/` and set `modelUrl` on the
 agent:
 
 ```ts
 updateAgent('a1', { modelUrl: '/models/minifig.glb' })
-preloadMinifigure('/models/minifig.glb')   // optional, at module scope
+preloadAgentFigure('/models/agent.glb')   // optional, at module scope
 ```
 
 Each agent renders its own `SkeletonUtils.clone()` of the cached glTF scene, and
@@ -165,7 +181,10 @@ moves its agents to the Bench rather than deleting them. Seats are positional:
 an agent's spot is its index within its team, and pods create additional full
 desk-and-chair rows as needed. Roles are not selected from a fixed list: enter a
 role name and describe its responsibilities, then optionally make one member
-the team's lead and final reviewer.
+the team's lead and final reviewer. Agents can report to any teammate, including
+another sub-agent, producing an unlimited-depth hierarchy. Cycles are rejected;
+moving a manager to another team carries its entire subtree, and every level
+remains independently assignable.
 
 **Assignments and running them.** Open *Assign* to choose an individual agent or
 an entire team, write the brief, specify the exact output format, and attach
@@ -177,6 +196,12 @@ agent has Low, Medium, or High effort instead of temperature; higher effort
 uses a larger token budget and provider reasoning effort where supported.
 Every completed team delivery is also published as a Markdown file in the
 shared workspace library, where any agent or team can attach it to later work.
+
+**Approval and learning.** New drafts wait for the workspace owner by default.
+Only an approved individual or team delivery becomes final, enters the shared
+file library, and is added to the agents' bounded learning memory. That memory
+is visible in each agent panel and is reused only for explicitly assigned work.
+The *Skip my approval* option enables trusted auto-approval when desired.
 
 **Files.** *Files* accepts any file up to 10 MB and stores it in browser
 IndexedDB. Word, Excel, PowerPoint, OpenDocument and EPUB packages are converted

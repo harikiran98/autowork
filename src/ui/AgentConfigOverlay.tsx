@@ -11,6 +11,7 @@ import { BENCH_ID } from '../data/org'
 import { useWorkspace, type Agent, type Effort } from '../state/workspaceStore'
 import { useAccentColor, useAvatarStyle, usePillStyle } from '../theme/pill'
 import { TaskList } from './TaskList'
+import { useMotion } from '../three/motion'
 
 /** Chip colours are plain hexes so `pill()` can derive both themes from them. */
 const STATUS_HEX: Record<Agent['status'], string> = {
@@ -18,6 +19,17 @@ const STATUS_HEX: Record<Agent['status'], string> = {
   idle: '#8394ab',
   blocked: '#f43f5e',
   break: '#d49a45',
+}
+
+function isBelow(candidate: Agent, ancestorId: string, agents: Agent[]): boolean {
+  const seen = new Set<string>()
+  let current: Agent | undefined = candidate
+  while (current?.parentAgentId && !seen.has(current.id)) {
+    if (current.parentAgentId === ancestorId) return true
+    seen.add(current.id)
+    current = agents.find((item) => item.id === current?.parentAgentId)
+  }
+  return false
 }
 
 /**
@@ -31,10 +43,13 @@ export function AgentConfigOverlay() {
   const select = useWorkspace((s) => s.select)
   const setTeamLead = useWorkspace((s) => s.setTeamLead)
   const assignTeam = useWorkspace((s) => s.assignTeam)
+  const assignParent = useWorkspace((s) => s.assignParent)
   const setProvider = useWorkspace((s) => s.setProvider)
   const updateAgent = useWorkspace((s) => s.updateAgent)
   const deleteAgent = useWorkspace((s) => s.deleteAgent)
   const teams = useWorkspace((s) => s.teams)
+  const agents = useWorkspace((s) => s.agents)
+  const workspaceOnline = useWorkspace((s) => s.workspaceOnline)
 
   const pill = usePillStyle()
   const accent = useAccentColor()
@@ -154,12 +169,33 @@ export function AgentConfigOverlay() {
           <p className="mt-2.5 px-1 text-xs leading-relaxed text-ink-faint">{team.mission}</p>
         </section>
 
+        {/* Recursive reporting line */}
+        <section>
+          <label htmlFor="agent-parent" className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Agent hierarchy</label>
+          <select
+            id="agent-parent"
+            aria-label="Reports to agent"
+            value={agent.parentAgentId ?? ''}
+            onChange={(event) => assignParent(agent.id, event.target.value || null)}
+            className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring"
+          >
+            <option value="">Top-level agent</option>
+            {agents.filter((candidate) => candidate.teamId === agent.teamId && candidate.id !== agent.id && !isBelow(candidate, agent.id, agents)).map((candidate) => <option key={candidate.id} value={candidate.id}>Reports to {candidate.name} — {candidate.roleName}</option>)}
+          </select>
+          <p className="mt-2 px-1 text-xs leading-relaxed text-ink-faint">Nest this agent under any teammate. Cycles are blocked, while sub-agents can manage deeper sub-agents without a level limit.</p>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Approved learning memory</h3>
+          {agent.memory?.length ? <div className="space-y-2">{agent.memory.slice(-4).reverse().map((memory) => <div key={memory.id} className="rounded-2xl border border-line bg-surface/60 px-3.5 py-3"><p className="line-clamp-3 text-xs leading-relaxed text-ink-soft">{memory.lesson}</p><p className="mt-1.5 text-[10px] text-ink-faint">Approved {new Date(memory.learnedAt).toLocaleDateString()}</p></div>)}</div> : <p className="rounded-2xl bg-surface-2 px-3.5 py-3 text-xs leading-relaxed text-ink-faint">No approved learning yet. Drafts are added here only after you approve them.</p>}
+        </section>
+
         {/* Custom role */}
         <section className="space-y-3">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Custom role</h3>
           <label className="block"><span className="mb-1.5 block text-xs font-semibold text-ink-soft">Role name</span><input value={agent.roleName} onChange={(e) => updateAgent(agent.id, { roleName: e.target.value })} className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
           <label className="block"><span className="mb-1.5 block text-xs font-semibold text-ink-soft">Role description</span><textarea rows={3} value={agent.roleDescription} onChange={(e) => updateAgent(agent.id, { roleDescription: e.target.value })} className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
-          {agent.teamId !== BENCH_ID && <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3"><input type="checkbox" checked={agent.isTeamLead} onChange={(e) => setTeamLead(agent.id, e.target.checked)} className="h-4 w-4 accent-[var(--color-accent)]" /><span className="text-sm font-semibold text-ink">Team lead and final reviewer</span></label>}
+          {agent.teamId !== BENCH_ID && !agent.parentAgentId && <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3"><input type="checkbox" checked={agent.isTeamLead} onChange={(e) => setTeamLead(agent.id, e.target.checked)} className="h-4 w-4 accent-[var(--color-accent)]" /><span className="text-sm font-semibold text-ink">Team lead and final reviewer</span></label>}
         </section>
 
         {/* Model */}
@@ -219,11 +255,15 @@ export function AgentConfigOverlay() {
         <div className="flex gap-2.5">
           <button
             type="button"
-            disabled={agent.status === 'working'}
-            onClick={() => updateAgent(agent.id, { status: agent.status === 'break' ? 'idle' : 'break' })}
-            className="flex-1 rounded-[18px] bg-solid py-3 text-sm font-semibold text-on-solid shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+            disabled={!workspaceOnline || agent.status === 'working'}
+            onClick={() => {
+              const takingBreak = agent.status !== 'break'
+              updateAgent(agent.id, { status: takingBreak ? 'break' : 'idle' })
+              if (takingBreak) useMotion.setState({ paused: false })
+            }}
+            className="flex-1 rounded-[18px] bg-solid py-3 text-sm font-semibold text-on-solid shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
           >
-            {agent.status === 'working' ? 'Working…' : agent.status === 'break' ? 'Return to desk' : 'Take a break'}
+            {!workspaceOnline ? 'Workspace is off' : agent.status === 'working' ? 'Working…' : agent.status === 'break' ? 'Return to desk' : 'Take a break'}
           </button>
           <button
             type="button"

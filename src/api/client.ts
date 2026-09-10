@@ -393,28 +393,35 @@ export async function loadState<T>(): Promise<T | null> {
   return null
 }
 
+/**
+ * Writes the browser snapshot and reports whether *that* succeeded.
+ *
+ * `false` means the workspace was genuinely not saved — almost always a
+ * localStorage quota rejection — so the caller can retry with a smaller
+ * snapshot rather than silently losing the profile, teams and agents.
+ */
 export async function saveState<T>(state: T): Promise<boolean> {
+  if (!storageAvailable()) return false
+  let stored = true
   try {
-    if (storageAvailable()) localStorage.setItem(stateKey(), JSON.stringify(state))
+    localStorage.setItem(stateKey(), JSON.stringify(state))
   } catch {
-    return false
+    stored = false
   }
 
   // Local development keeps the original disk snapshot as a convenient
   // backup. Deployed workspaces intentionally remain private to this browser.
-  if (typeof location !== 'undefined' && !['localhost', '127.0.0.1'].includes(location.hostname)) {
-    return true
-  }
-  try {
-    const res = await fetch('/api/state', {
+  // Its outcome is deliberately excluded from the return value and not awaited:
+  // the browser snapshot is the source of truth, so a stopped dev server must
+  // neither look like lost data nor delay the next save.
+  if (stored && typeof location !== 'undefined' && ['localhost', '127.0.0.1'].includes(location.hostname)) {
+    void fetch('/api/state', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ state }),
-    })
-    return res.ok
-  } catch {
-    return false
+    }).catch(() => undefined)
   }
+  return stored
 }
 
 /* --------------------------------- files --------------------------------- */

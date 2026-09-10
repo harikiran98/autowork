@@ -13,6 +13,7 @@
     "test:mock": "node test/mock-llm.mjs",
     "test:contrast": "node test/contrast-audit.mjs",
     "test:e2e": "node test/e2e.mjs",
+    "test:scene": "node test/scene-audit.mjs",
     "test:netlify": "node test/netlify-function.mjs",
     "test:visual": "node test/visual-review.mjs"
   },

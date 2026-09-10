@@ -48,6 +48,40 @@ await page.getByRole('button',{name:'Create agent'}).click()
 await page.waitForTimeout(2500)
 step('created agent "Kira" in Design Systems')
 
+// A sub-agent can report to Kira, and can later receive descendants of its own.
+await page.getByRole('button',{name:'New agent'}).click()
+await page.getByLabel('Name',{exact:true}).fill('Nova')
+await page.locator('[role=dialog]').getByRole('button',{name:'Design Systems',exact:true}).click()
+const novaDialog = page.getByRole('dialog', { name: 'New agent' })
+const parentOptions = novaDialog.locator('#new-agent-parent option')
+const parentLabels = await parentOptions.allTextContents()
+const kiraParentIndex = parentLabels.findIndex((label) => label.includes('Kira'))
+assert.ok(kiraParentIndex >= 0)
+await novaDialog.getByLabel('Reports to').selectOption(await parentOptions.nth(kiraParentIndex).getAttribute('value'))
+await novaDialog.getByLabel('Role name').fill('Component researcher')
+await novaDialog.getByLabel('Describe the role').fill('Researches component behavior for the parent agent.')
+await novaDialog.getByRole('button',{name:'Create agent'}).click()
+await page.waitForTimeout(800)
+assert.equal(await page.getByRole('button', { name: /Nova.*reports to Kira/ }).count(), 1)
+step('created recursive sub-agent "Nova" under Kira')
+
+// Explicit breaks override normal desk, cubicle, and workflow destinations.
+await page.getByRole('button',{name:/Kira, Design systems analyst/}).first().click()
+await page.locator('aside .overflow-y-auto').first().evaluate(el=>el.scrollTo(0,el.scrollHeight))
+await page.getByRole('button',{name:'Take a break'}).click()
+await page.getByRole('button',{name:'Return to desk'}).waitFor()
+await page.getByRole('button',{name:'Return to desk'}).click()
+await page.getByRole('button',{name:'Take a break'}).waitFor()
+step('break control sends the agent out and returns it to work')
+await page.getByRole('button',{name:'Close'}).click()
+
+// The workspace power state is reversible and keeps queues/memory intact.
+await page.getByLabel('Shut down workspace').click()
+await page.getByLabel('Turn on workspace').waitFor()
+await page.getByLabel('Turn on workspace').click()
+await page.getByLabel('Shut down workspace').waitFor()
+step('workspace power control shuts down and resumes')
+
 // ---- upload text extracted from Word, a native PDF, and an arbitrary binary ----
 await page.getByRole('button',{name:'Files'}).click()
 await page.waitForTimeout(600)
@@ -101,6 +135,16 @@ console.log('  run button present:', await runBtn.count())
 await runBtn.click()
 await page.waitForTimeout(3500)
 step('ran tasks')
+await page.getByText('Awaiting your approval').first().waitFor()
+while (await page.getByRole('button', { name: 'Approve & learn' }).count()) {
+  await page.getByRole('button', { name: 'Approve & learn' }).first().click()
+}
+// Case-insensitive: the section heading is rendered through `uppercase`, and
+// innerText reports the transformed text.
+const memoryPanel = await page.locator('aside').first().innerText()
+assert.match(memoryPanel, /approved learning memory/i)
+assert.match(memoryPanel, /the approved approach\/output was/i)
+step('approved individual drafts and stored learning memory')
 await page.screenshot({ path:SHOTS + 'e2e-3-run.png' })
 
 // ---- run a collaborative team workflow with lead approval ----
@@ -111,8 +155,11 @@ await page.getByLabel('Work brief').fill('Produce a concise release readiness ch
 await page.getByLabel('Output format').fill('Markdown checklist with owner and evidence columns')
 await page.getByRole('button',{name:'Assign & start'}).click()
 const teamCard = page.locator('article').filter({ hasText: 'release readiness checklist' })
-await teamCard.getByText(/Delivered/).waitFor({ timeout: 20000 })
+await teamCard.getByText(/Waiting for your approval/).waitFor({ timeout: 20000 })
 assert.match(await teamCard.innerText(), /3\/3 contributions/)
+assert.doesNotMatch(await teamCard.innerText(), /Shared with every team as/)
+await teamCard.getByRole('button', { name: 'Approve, share & learn' }).click()
+await teamCard.getByText(/Delivered/).waitFor()
 assert.match(await teamCard.innerText(), /Shared with every team as platform-delivery-/)
 const sharedDelivery = page.getByRole('button', { name: /platform-delivery-.*\.md/ })
 await sharedDelivery.waitFor()
@@ -144,6 +191,65 @@ await page.waitForTimeout(900)
 console.log('  after reload, outputs kept:', await page.locator('article').count())
 assert.equal(await page.locator('article').count(), 3)
 await page.screenshot({ path:SHOTS + 'e2e-5-reload.png' })
+
+// The workspace name has to come back with it. A profile that was stored while
+// still unnamed used to defeat the hydrate fallback, so the header showed the
+// generic "Workspace" label and the first-run dialog reopened over a workspace
+// that already existed.
+assert.equal(await page.getByRole('dialog', { name: 'Create your workspace' }).count(), 0)
+// The header prints the name and mirrors it into `title`, falling back to the
+// generic "Workspace" when the profile is empty — so this reads the exact
+// element that regressed.
+const workspaceLabel = page.locator('header p[title]').first()
+assert.equal(await workspaceLabel.getAttribute('title'), 'E2E Studio')
+assert.equal((await workspaceLabel.innerText()).trim(), 'E2E Studio')
+const savedProfile = await page.evaluate(() => {
+  const key = Object.keys(localStorage).find((name) => name.endsWith(':state:v1'))
+  return key ? JSON.parse(localStorage.getItem(key)).profile : null
+})
+assert.equal(savedProfile?.workspaceName, 'E2E Studio')
+assert.equal(savedProfile?.ownerName, 'E2E Owner')
+step('workspace name and owner survived the reload')
+
+// ---- shutting down while a model request is genuinely in flight ----
+// The mock holds a [[slow]] prompt open, so the power button has to interrupt
+// a live call rather than one that already resolved.
+await page.getByRole('button',{name:'Close panel'}).click()
+await page.getByRole('button',{name:/Kira, Design systems analyst/}).first().click()
+await page.waitForTimeout(1200)
+await page.getByLabel('New task').fill('Draft the rollout note. [[slow]]')
+await page.getByRole('button',{name:'Add',exact:true}).click()
+await page.waitForTimeout(400)
+await page.locator('aside .overflow-y-auto').first().evaluate(el=>el.scrollTo(0,el.scrollHeight))
+await page.getByRole('button',{name:/Run 1 task/}).click()
+await page.getByRole('button',{name:/^Running/}).waitFor({ timeout: 15000 })
+step('a model request is in flight')
+
+await page.getByLabel('Shut down workspace').click()
+await page.getByLabel('Turn on workspace').waitFor()
+await page.waitForTimeout(1500)
+const panelWhileOff = await page.locator('aside').first().innerText()
+// Interrupted work must return to a resumable queued state, never to a failure.
+assert.match(panelWhileOff, /Workspace is shut down/)
+assert.match(panelWhileOff, /Queued/)
+assert.doesNotMatch(panelWhileOff, /Failed/)
+step('shutdown aborted the live request and requeued the task')
+
+// ---- power state survives a reload, and restoring it resumes the run ----
+await page.waitForTimeout(1200)
+await page.reload({ waitUntil:'load' })
+await page.waitForTimeout(4000)
+await page.getByLabel('Turn on workspace').waitFor({ timeout: 15000 })
+assert.equal(await page.locator('header p[title]').first().getAttribute('title'), 'E2E Studio')
+step('power state and workspace name persisted across the reload')
+
+await page.getByLabel('Turn on workspace').click()
+await page.getByLabel('Shut down workspace').waitFor()
+await page.getByRole('button',{name:'Outputs',exact:true}).click()
+await page.locator('article').filter({ hasText: 'Draft the rollout note' }).first()
+  .waitFor({ timeout: 45000 })
+assert.equal(await page.locator('article').count(), 4)
+step('restoring power resumed the interrupted run from its queued stage')
 
 // ---- account isolation on a shared browser ----
 await page.getByRole('button',{name:'Open account menu'}).click()
