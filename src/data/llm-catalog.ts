@@ -44,10 +44,9 @@ export const PROVIDERS: Provider[] = [
     label: 'Anthropic',
     accent: '#d97757',
     models: [
-      { id: 'claude-fable-5.1', note: 'Mythos tier — hardest problems', tier: 'frontier' },
-      { id: 'claude-opus-5', note: 'Powerful all-rounder', tier: 'frontier' },
-      { id: 'claude-sonnet-5', note: 'Balanced speed & depth', tier: 'balanced' },
-      { id: 'claude-haiku-4.5', note: 'Fastest, most economical', tier: 'fast' },
+      { id: 'claude-sonnet-4-5', note: 'Best balance of quality and speed', tier: 'balanced' },
+      { id: 'claude-opus-4-1', note: 'Deepest analysis for difficult work', tier: 'frontier' },
+      { id: 'claude-haiku-4-5', note: 'Fastest, most economical', tier: 'fast' },
     ],
   },
 ]

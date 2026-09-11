@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import netlifyApi, { handleEventForTests } from '../netlify/functions/api.mjs'
+import netlifyApi, { handleEventForTests, MODEL_TIMEOUT_MS } from '../netlify/functions/api.mjs'
+
+assert.equal(MODEL_TIMEOUT_MS, 52000)
 
 process.env.WORKPLACE_ACCESS_CODE = 'test-access'
 
@@ -56,6 +58,24 @@ const documentRequest = await handleEventForTests({
 assert.equal(documentRequest.statusCode, 200)
 assert.ok(upstreamBody.messages[0].content.some((part) => part.type === 'document'))
 assert.ok(upstreamBody.messages[0].content.some((part) => part.type === 'text' && part.text.includes('Extracted Word content')))
+assert.equal(upstreamBody.tools[0].type, 'web_search_20250305')
+
+globalThis.fetch = async (url, options) => {
+  assert.ok(String(url).endsWith('/responses'))
+  upstreamBody = JSON.parse(options.body)
+  return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: '# Researched answer', annotations: [{ type: 'url_citation', url: 'https://example.com/source', title: 'Source' }] }] }, { type: 'web_search_call' }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+process.env.OPENAI_API_KEY = 'test-key'
+const openaiRequest = await handleEventForTests({
+  httpMethod: 'POST', path: '/api/chat', headers: {},
+  body: JSON.stringify({ provider: 'openai', model: 'gpt-test', prompt: 'Research this', effort: 'medium' }),
+})
+assert.equal(openaiRequest.statusCode, 200)
+assert.equal(upstreamBody.tools[0].type, 'web_search')
+assert.equal(upstreamBody.input[0].content[0].type, 'input_text')
+assert.equal(JSON.parse(openaiRequest.body).webUsed, true)
+assert.match(JSON.parse(openaiRequest.body).text, /https:\/\/example\.com\/source/)
+delete process.env.OPENAI_API_KEY
 
 const unsupportedClaudeFile = await handleEventForTests({
   httpMethod: 'POST', path: '/api/chat', headers: {},

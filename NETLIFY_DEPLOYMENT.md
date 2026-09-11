@@ -69,20 +69,19 @@ After changing variables, trigger a fresh deploy.
 
 ### Function timeout — check this before blaming the app
 
-Netlify's synchronous function timeout is **10 seconds by default and 26
-seconds at most**, and on most plans the increase has to be requested from
-Netlify support. The platform enforces it by terminating the invocation, so if
-the gateway's own model budget is set higher, the function is killed before it
-can return its error and the browser gets a bare **504** with no message. That
-is the usual cause of a team assignment failing with `Request failed (504)`
-while short individual tasks succeed.
+Netlify's current synchronous function limit is **60 seconds**. The platform
+terminates work at that boundary, so autowork keeps its own model deadline
+below it; otherwise the browser receives a bare **504** instead of a useful
+JSON response. Team assignments encounter this more often because planning and
+review prompts are larger than short individual tasks.
 
-The gateway budgets 24 seconds by default. If Netlify has raised your site's
-ceiling, set `MODEL_TIMEOUT_MS` to roughly two seconds below whatever it
-granted (for a 26-second ceiling, `24000`). Never set it above the ceiling.
+The gateway budgets 52 seconds inside Netlify's 60-second synchronous function
+limit, reserving time to return a useful error response. If a model still times
+out, autowork automatically retries that step using the same provider's fast
+model at low effort; the assignment, files and approval flow are preserved.
 
-If team work still times out, lower the team lead's effort from High to Medium
-— the lead's planning and review calls are the largest requests in the app.
+`MODEL_TIMEOUT_MS` can be used to shorten the internal budget, but values above
+52,000 ms are capped so Netlify does not replace the response with a bare 504.
 
 Never prefix a secret with `VITE_`; Vite variables are shipped to the browser.
 
@@ -115,7 +114,9 @@ Open the generated `https://YOUR-SITE.netlify.app` URL. Then check:
 4. The configured provider is `true` in the `providers` object.
 5. Complete the workspace-name prompt, open **Assign**, add a small individual
    assignment, and run it.
-6. Refresh the page and confirm the workspace is restored.
+6. Ask for a Word or PDF output, confirm the answer renders correctly, then use
+   **Download** and approve it to add the real file to the shared library.
+7. Refresh the page and confirm the workspace is restored.
 
 Agent configuration and uploaded files are stored in that browser. They
 are not shared across devices or users. Attached file contents are sent to the
@@ -146,5 +147,7 @@ targets from an old tutorial; Netlify tailors them to the domain and network.
   deploy log shows the `api` function.
 - **A model returns 400/404:** update its ID in `src/data/llm-catalog.ts`; model
   availability depends on the provider account.
+- **Web research is rejected:** confirm web search is enabled for the provider
+  account and that it has billing available. The key remains server-side.
 - **Domain remains pending:** use Netlify's domain-specific DNS instructions and
   remove conflicting A, AAAA, or CNAME records at the same hostname.

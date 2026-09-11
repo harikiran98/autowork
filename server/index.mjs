@@ -61,8 +61,14 @@ const WORKSPACE = join(ROOT, 'workspace')
 const DATA_DIR = join(ROOT, 'data')
 const STATE_FILE = join(DATA_DIR, 'state.json')
 const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-/** Mirrors the hosted gateway so a slow model behaves the same in both places. */
-const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(120000, Number(process.env.MODEL_TIMEOUT_MS) || 24000))
+/** Mirrors the hosted gateway's safe budget so local and production agree. */
+const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(52000, Number(process.env.MODEL_TIMEOUT_MS) || 52000))
+
+const appendSources = (text, citations) => {
+  const unique = [...new Map(citations.filter((item) => item?.url).map((item) => [item.url, item])).values()]
+  const missing = unique.filter((item) => !String(text).includes(item.url))
+  return missing.length ? `${text}\n\n### Sources\n${missing.map((item) => `- [${item.title || item.url}](${item.url})`).join('\n')}` : text
+}
 
 /** Text formats an LLM can actually read as-is. Anything else is refused. */
 const TEXT_EXTENSIONS = new Set([
@@ -88,33 +94,31 @@ const PROVIDERS = {
   openai: {
     envKey: 'OPENAI_API_KEY',
     // Override to point at Azure OpenAI, a corporate gateway, or a local mock.
-    endpoint: `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`,
+    endpoint: `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/responses`,
     headers: (key) => ({ 'content-type': 'application/json', authorization: `Bearer ${key}` }),
-    body: ({ model, system, prompt, effort, maxTokens, attachments }) => {
-      // o-series reasoning models reject `temperature` and rename the token
-      // budget. Sending the chat-model shape to them is a 400.
-      const isReasoning = /^o\d/.test(model)
+    body: ({ model, system, prompt, effort, maxTokens, attachments, webAccess }) => {
       const content = [
-        { type: 'text', text: prompt },
-        // Both parts need a full data URL; bare base64 in `file_data` is
-        // accepted but unreadable, so the model sees no attachment.
+        { type: 'input_text', text: prompt },
         ...attachments.map((file) => file.mimeType.startsWith('image/')
-          ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
-          : { type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` } }),
+          ? { type: 'input_image', image_url: `data:${file.mimeType};base64,${file.data}` }
+          : { type: 'input_file', filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` }),
       ]
       return {
         model,
-        messages: [
-          ...(system ? [{ role: 'system', content: system }] : []),
-          { role: 'user', content: attachments.length ? content : prompt },
-        ],
-        ...(isReasoning
-          ? { max_completion_tokens: maxTokens }
-          : { max_tokens: maxTokens }),
-        reasoning_effort: effort,
+        ...(system ? { instructions: system } : {}),
+        input: [{ role: 'user', content }],
+        max_output_tokens: maxTokens,
+        reasoning: { effort },
+        ...(webAccess ? { tools: [{ type: 'web_search', search_context_size: effort }] } : {}),
+        store: false,
       }
     },
-    text: (json) => json?.choices?.[0]?.message?.content ?? '',
+    text: (data) => {
+      const parts = (data?.output ?? []).flatMap((item) => item?.content ?? []).filter((part) => part?.type === 'output_text')
+      const citations = parts.flatMap((part) => part.annotations ?? []).map((item) => item?.url_citation ?? item).filter((item) => item?.url)
+      return appendSources(parts.map((part) => part.text ?? '').join('\n'), citations)
+    },
+    webUsed: (data) => (data?.output ?? []).some((item) => item?.type === 'web_search_call'),
   },
 
   anthropic: {
@@ -126,10 +130,12 @@ const PROVIDERS = {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     }),
-    body: ({ model, system, prompt, effort, maxTokens, attachments }) => ({
+    body: ({ model, system, prompt, effort, maxTokens, attachments, webAccess }) => ({
       model,
       max_tokens: maxTokens,
-      ...(/(?:-5|4\.[6-9])/.test(model) ? { thinking: { type: 'adaptive' }, output_config: { effort } } : {}),
+      // Effort controls the output budget. Do not send provider-specific
+      // thinking fields to models that reject that request shape.
+      ...(webAccess ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: effort === 'high' ? 6 : effort === 'medium' ? 4 : 2 }] } : {}),
       ...(system ? { system } : {}),
       messages: [{
         role: 'user',
@@ -141,10 +147,12 @@ const PROVIDERS = {
         ] : prompt,
       }],
     }),
-    text: (json) =>
-      Array.isArray(json?.content)
-        ? json.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
-        : '',
+    text: (data) => {
+      if (!Array.isArray(data?.content)) return ''
+      const parts = data.content.filter((item) => item.type === 'text')
+      return appendSources(parts.map((item) => item.text).join(''), parts.flatMap((item) => item.citations ?? []))
+    },
+    webUsed: (data) => Array.isArray(data?.content) && data.content.some((part) => part.type === 'web_search_tool_result' || part.type === 'server_tool_use'),
   },
 }
 
@@ -345,6 +353,7 @@ const server = createServer(async (req, res) => {
         maxTokens = 2048,
         attachments = [],
         attachmentContents = [],
+        webAccess = true,
       } = body
 
       const adapter = PROVIDERS[provider]
@@ -405,7 +414,7 @@ const server = createServer(async (req, res) => {
           method: 'POST',
           headers: adapter.headers(key),
           body: JSON.stringify(
-            adapter.body({ model, system, prompt: fullPrompt, effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium', maxTokens, attachments: nativeAttachments }),
+            adapter.body({ model, system, prompt: fullPrompt, effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium', maxTokens, attachments: nativeAttachments, webAccess: webAccess !== false }),
           ),
           // Same budget as the hosted gateway, so a model that is too slow for
           // production fails the same way here instead of hanging forever.
@@ -421,9 +430,13 @@ const server = createServer(async (req, res) => {
           return
         }
 
-        json(res, 200, { text: adapter.text(data), provider, model, attachmentsUsed: used })
+        json(res, 200, { text: adapter.text(data), provider, model, attachmentsUsed: used, webUsed: adapter.webUsed(data) })
       } catch (err) {
-        json(res, 502, { error: `Could not reach ${provider}: ${err.message}` })
+        const message = err instanceof Error ? err.message : 'Request failed.'
+        const timedOut = err instanceof Error && (err.name === 'TimeoutError' || message.toLowerCase().includes('timeout') || message.toLowerCase().includes('aborted'))
+        json(res, timedOut ? 504 : 502, { error: timedOut
+          ? `This model did not finish within the ${Math.round(MODEL_TIMEOUT_MS / 1000)}-second response window. Autowork will retry this step once with the same provider's fast model at low effort.`
+          : `Could not reach ${provider}: ${message}` })
       }
       return
     }

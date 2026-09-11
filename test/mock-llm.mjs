@@ -13,17 +13,19 @@ createServer((req, res) => {
   req.on('data', (c) => (body += c))
   req.on('end', () => {
     const parsed = JSON.parse(body || '{}')
-    const content = parsed.messages?.find((message) => message.role === 'user')?.content ?? ''
+    const isOpenAI = req.url?.includes('/responses')
+    const content = isOpenAI
+      ? parsed.input?.find((message) => message.role === 'user')?.content ?? ''
+      : parsed.messages?.find((message) => message.role === 'user')?.content ?? ''
     const user = Array.isArray(content)
-      ? content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
+      ? content.filter((part) => part.type === 'text' || part.type === 'input_text').map((part) => part.text).join('\n')
       : content
-    const sawFile = user.includes('--- FILE:') || (Array.isArray(content) && content.some((part) => ['document', 'image', 'file', 'image_url'].includes(part.type)))
+    const sawFile = user.includes('--- FILE:') || (Array.isArray(content) && content.some((part) => ['document', 'image', 'file', 'image_url', 'input_file', 'input_image'].includes(part.type)))
     const text = user.includes('Review the team\'s work against every requirement')
       ? 'VERDICT: APPROVED\nFINAL:\n# Mock team delivery\n\nThe team lead reviewed and approved this collaborative output.'
       : `MOCK REPLY for "${user.slice(0, 60).replace(/\n/g, ' ')}"${sawFile ? ' [file received]' : ''}`
-    const isOpenAI = req.url?.includes('chat/completions')
     const payload = JSON.stringify(isOpenAI
-      ? { choices: [{ message: { role: 'assistant', content: text } }] }
+      ? { output: [{ type: 'message', content: [{ type: 'output_text', text, annotations: [] }] }] }
       : { content: [{ type: 'text', text }] })
 
     const reply = () => {

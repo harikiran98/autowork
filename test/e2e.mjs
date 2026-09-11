@@ -28,6 +28,49 @@ await page.getByLabel('Contact number').fill('+91 90000 00000')
 await page.getByRole('dialog', { name: 'Create your workspace' }).getByRole('button', { name: 'Enter workspace' }).click()
 await page.waitForTimeout(4000)
 
+// A hosted 504 must recover without asking the user to edit the agent. The
+// second request is a fresh function invocation using the same provider's fast
+// model and low effort, while keeping the original task contract.
+if (new URL(BASE).hostname === 'localhost' || new URL(BASE).hostname === '127.0.0.1') {
+  const artifacts = await page.evaluate(async () => {
+    const api = await import('/src/output/artifacts.ts')
+    const formats = ['Word document', 'PDF report', 'Excel spreadsheet', 'PowerPoint deck', 'Markdown', 'JSON', 'CSV', 'HTML']
+    return Promise.all(formats.map(async (format) => {
+      const file = await api.buildOutputFile('# Delivery\n\n| Item | Value |\n|---|---|\n| Status | Complete |', format, 'Export probe')
+      const bytes = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+      return { format, name: file.name, size: file.size, magic: [...bytes] }
+    }))
+  })
+  assert.ok(artifacts.every((item) => item.size > 20))
+  assert.deepEqual(artifacts.find((item) => item.format === 'PDF report').magic, [37, 80, 68, 70])
+  for (const format of ['Word document', 'Excel spreadsheet', 'PowerPoint deck']) assert.deepEqual(artifacts.find((item) => item.format === format).magic.slice(0, 2), [80, 75])
+  step('built valid downloadable PDF, Word, Excel, PowerPoint, Markdown, JSON, CSV and HTML files')
+
+  const recoveryBodies = []
+  await page.route('**/api/chat', async (route) => {
+    const body = route.request().postDataJSON()
+    if (!String(body.prompt).includes('timeout recovery probe')) return route.continue()
+    recoveryBodies.push(body)
+    if (recoveryBodies.length === 1) {
+      return route.fulfill({ status: 504, contentType: 'application/json', body: JSON.stringify({ error: 'The operation was aborted due to timeout' }) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: 'automatic recovery completed' }) })
+  })
+  const recovered = await page.evaluate(async () => {
+    const api = await import('/src/api/client.ts')
+    return api.runAgent({ provider: 'anthropic', model: 'claude-opus-4-1', prompt: 'timeout recovery probe', effort: 'high', maxTokens: 5200 })
+  })
+  assert.equal(recovered.text, 'automatic recovery completed')
+  assert.equal(recovered.model, 'claude-haiku-4-5')
+  assert.equal(recovered.recoveredFromTimeout, true)
+  assert.equal(recoveryBodies.length, 2)
+  assert.equal(recoveryBodies[1].model, 'claude-haiku-4-5')
+  assert.equal(recoveryBodies[1].effort, 'low')
+  assert.equal(recoveryBodies[1].maxTokens, 1600)
+  await page.unroute('**/api/chat')
+  step('recovered a hosted 504 automatically with the provider fast model')
+}
+
 // ---- create a team ----
 await page.getByRole('button',{name:'New team'}).click()
 await page.getByLabel('Name',{exact:true}).fill('Design Systems')
@@ -90,7 +133,7 @@ const docx = zipSync({
   'word/document.xml': strToU8('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>We need a date-picker component with range selection.</w:t></w:r></w:p></w:body></w:document>'),
 })
 await page.setInputFiles('input[type=file]', [
-  { name:'brief.docx', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer:Buffer.from(docx) },
+  { name:'AS_IS_Spot Billing_V1.2.docx', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer:Buffer.from(docx) },
   { name:'reference.pdf', mimeType:'application/pdf', buffer:Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF') },
   { name:'design.blend', mimeType:'application/octet-stream', buffer:Buffer.from([1,2,3,4,5]) },
 ])
@@ -107,7 +150,7 @@ await page.waitForTimeout(400)
 await page.getByRole('button',{name:/Kira/}).first().click()
 await page.waitForTimeout(1500)
 const taskInput = page.getByLabel('New task')
-await taskInput.fill('Write acceptance criteria for the date picker.')
+await taskInput.fill('Review AS_IS_Spot Billing_V1.2 and write acceptance criteria for the date picker.')
 await page.getByRole('button',{name:'Add',exact:true}).click()
 await page.waitForTimeout(300)
 await taskInput.fill('List the edge cases QA should cover.')
@@ -115,12 +158,11 @@ await page.getByRole('button',{name:'Add',exact:true}).click()
 await page.waitForTimeout(500)
 step('added 2 tasks')
 
-// attach the file to the first task
-await page.getByRole('button',{name:'Attach files'}).first().click()
-await page.waitForTimeout(300)
-await page.getByRole('button',{name:/brief\.docx/}).first().click()
+// Mentioning a workspace filename attaches it automatically—uploading to the
+// Files library must not require a second, easy-to-miss manual action.
 await page.waitForTimeout(400)
-console.log('  attachment label:', await page.locator('button:has-text("1 file attached")').count())
+assert.ok(await page.locator('button:has-text("1 file attached")').count() >= 1)
+step('matched the mentioned Word file to the individual task automatically')
 
 // attach the PDF to the second task; it should use Claude's native document block
 await page.getByRole('button',{name:'Attach files'}).first().click()
@@ -136,8 +178,9 @@ await runBtn.click()
 await page.waitForTimeout(3500)
 step('ran tasks')
 await page.getByText('Awaiting your approval').first().waitFor()
-while (await page.getByRole('button', { name: 'Approve & learn' }).count()) {
-  await page.getByRole('button', { name: 'Approve & learn' }).first().click()
+while (await page.getByRole('button', { name: 'Approve, save & learn' }).count()) {
+  await page.getByRole('button', { name: 'Approve, save & learn' }).first().click()
+  await page.waitForTimeout(400)
 }
 // Case-insensitive: the section heading is rendered through `uppercase`, and
 // innerText reports the transformed text.
@@ -160,8 +203,8 @@ assert.match(await teamCard.innerText(), /3\/3 contributions/)
 assert.doesNotMatch(await teamCard.innerText(), /Shared with every team as/)
 await teamCard.getByRole('button', { name: 'Approve, share & learn' }).click()
 await teamCard.getByText(/Delivered/).waitFor()
-assert.match(await teamCard.innerText(), /Shared with every team as platform-delivery-/)
-const sharedDelivery = page.getByRole('button', { name: /platform-delivery-.*\.md/ })
+assert.match(await teamCard.innerText(), /Shared with every team as platform-/)
+const sharedDelivery = page.getByRole('button', { name: /platform-.*\.md/ })
 await sharedDelivery.waitFor()
 await page.getByLabel('Assign to').selectOption('growth')
 assert.equal(await sharedDelivery.isVisible(), true, 'Completed team output must remain attachable after selecting another team')
@@ -266,6 +309,7 @@ const familyRoster = await page.locator('nav').first().textContent()
 assert.ok(!familyRoster.includes('Design Systems') && !familyRoster.includes('Kira'))
 step('kept the second account isolated from the first')
 
-console.log('  errors:', errs.length?errs.slice(0,5):'none')
-assert.deepEqual(errs, [])
+const unexpectedErrors = errs.filter((message) => !message.includes('status of 504 (Gateway Timeout)'))
+console.log('  errors:', unexpectedErrors.length ? unexpectedErrors.slice(0, 5) : 'none')
+assert.deepEqual(unexpectedErrors, [])
 await browser.close()

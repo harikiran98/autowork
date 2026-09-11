@@ -3,6 +3,7 @@ import { AGENT_COLORS, BENCH_ID, DEFAULT_TEAMS, TEAM_TINTS, type Team } from '..
 import { defaultModelFor, isModelValidFor, type ProviderId } from '../data/llm-catalog'
 import { ApiError, runAgent as callModel, uploadFile } from '../api/client'
 import { useFiles } from './filesStore'
+import { buildOutputFile } from '../output/artifacts'
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'break'
 export type TaskStatus = 'pending' | 'running' | 'awaiting_approval' | 'done' | 'error'
@@ -27,6 +28,9 @@ export interface Task {
   finishedAt?: number
   durationMs?: number
   ranWith?: { provider: ProviderId; model: string }
+  recoveredFromTimeout?: boolean
+  outputFile?: string
+  outputFileError?: string
   approvalFeedback?: string
 }
 
@@ -55,6 +59,8 @@ export interface TeamContribution {
   status: 'queued' | 'working' | 'done' | 'revision' | 'error'
   output?: string
   error?: string
+  ranWith?: { provider: ProviderId; model: string }
+  recoveredFromTimeout?: boolean
 }
 
 export interface TeamJob {
@@ -118,7 +124,7 @@ interface WorkspaceState {
   updateTask: (agentId: string, taskId: string, patch: Partial<Task>) => void
   removeTask: (agentId: string, taskId: string) => void
   resetTask: (agentId: string, taskId: string) => void
-  approveTask: (agentId: string, taskId: string) => void
+  approveTask: (agentId: string, taskId: string) => Promise<void>
   requestTaskRevision: (agentId: string, taskId: string, feedback?: string) => void
   runAgentTasks: (agentId: string) => Promise<void>
   createTeamJob: (teamId: string, brief: string, outputFormat: string, attachments: string[]) => string | null
@@ -166,30 +172,58 @@ const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').re
 const EMPTY_PROFILE: WorkspaceProfile = { ownerName: '', workspaceName: '', email: '', phone: '' }
 
 const seedAgents: Agent[] = [
-  { id: 'a1', name: 'Ada', teamId: 'platform', roleName: 'Platform Lead', roleDescription: 'Coordinates architecture, delivery and technical review.', isTeamLead: true, color: AGENT_COLORS[0], provider: 'anthropic', model: 'claude-opus-5', effort: 'high', systemPrompt: 'Coordinate the Platform backlog and unblock the team.', status: 'idle', tasks: [] },
+  { id: 'a1', name: 'Ada', teamId: 'platform', roleName: 'Platform Lead', roleDescription: 'Coordinates architecture, delivery and technical review.', isTeamLead: true, color: AGENT_COLORS[0], provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'high', systemPrompt: 'Coordinate the Platform backlog and unblock the team.', status: 'idle', tasks: [] },
   { id: 'a2', name: 'Bruno', teamId: 'platform', parentAgentId: 'a1', roleName: 'Backend Engineer', roleDescription: 'Builds reliable services, APIs and tests.', isTeamLead: false, color: AGENT_COLORS[1], provider: 'openai', model: 'gpt-5.6-terra', effort: 'medium', systemPrompt: 'Implement service changes with tests alongside.', status: 'idle', tasks: [] },
-  { id: 'a3', name: 'Cleo', teamId: 'platform', parentAgentId: 'a2', roleName: 'Quality Engineer', roleDescription: 'Finds failure modes and verifies releases.', isTeamLead: false, color: AGENT_COLORS[4], provider: 'anthropic', model: 'claude-haiku-4.5', effort: 'low', systemPrompt: 'Run the regression suite and report failures precisely.', status: 'idle', tasks: [] },
+  { id: 'a3', name: 'Cleo', teamId: 'platform', parentAgentId: 'a2', roleName: 'Quality Engineer', roleDescription: 'Finds failure modes and verifies releases.', isTeamLead: false, color: AGENT_COLORS[4], provider: 'anthropic', model: 'claude-haiku-4-5', effort: 'low', systemPrompt: 'Run the regression suite and report failures precisely.', status: 'idle', tasks: [] },
   { id: 'a4', name: 'Dex', teamId: 'growth', roleName: 'Growth Lead', roleDescription: 'Owns customer outcomes and reviews team delivery.', isTeamLead: true, color: AGENT_COLORS[3], provider: 'openai', model: 'gpt-5.4', effort: 'high', systemPrompt: 'Keep work focused on measurable customer outcomes.', status: 'idle', tasks: [] },
-  { id: 'a5', name: 'Esme', teamId: 'growth', parentAgentId: 'a4', roleName: 'Product Analyst', roleDescription: 'Turns user intent into precise requirements.', isTeamLead: false, color: AGENT_COLORS[2], provider: 'anthropic', model: 'claude-sonnet-5', effort: 'medium', systemPrompt: 'Translate product intent into acceptance criteria.', status: 'idle', tasks: [] },
+  { id: 'a5', name: 'Esme', teamId: 'growth', parentAgentId: 'a4', roleName: 'Product Analyst', roleDescription: 'Turns user intent into precise requirements.', isTeamLead: false, color: AGENT_COLORS[2], provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'medium', systemPrompt: 'Translate product intent into acceptance criteria.', status: 'idle', tasks: [] },
   { id: 'a6', name: 'Finn', teamId: 'growth', parentAgentId: 'a4', roleName: 'Frontend Engineer', roleDescription: 'Builds accessible, polished customer experiences.', isTeamLead: false, color: AGENT_COLORS[5], provider: 'openai', model: 'gpt-5.6-luna', effort: 'medium', systemPrompt: 'Own the onboarding funnel end to end.', status: 'idle', tasks: [] },
-  { id: 'a7', name: 'Gia', teamId: 'insights', roleName: 'Insights Lead', roleDescription: 'Sets the analytical direction and signs off findings.', isTeamLead: true, color: AGENT_COLORS[7], provider: 'anthropic', model: 'claude-fable-5.1', effort: 'high', systemPrompt: 'Set the analytics roadmap and review findings.', status: 'idle', tasks: [] },
+  { id: 'a7', name: 'Gia', teamId: 'insights', roleName: 'Insights Lead', roleDescription: 'Sets the analytical direction and signs off findings.', isTeamLead: true, color: AGENT_COLORS[7], provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'high', systemPrompt: 'Set the analytics roadmap and review findings.', status: 'idle', tasks: [] },
   { id: 'a8', name: 'Hugo', teamId: 'insights', parentAgentId: 'a7', roleName: 'Data Investigator', roleDescription: 'Interrogates evidence and explains business drivers.', isTeamLead: false, color: AGENT_COLORS[6], provider: 'openai', model: 'o3', effort: 'medium', systemPrompt: 'Interrogate the numbers before drawing conclusions.', status: 'idle', tasks: [] },
   { id: 'a9', name: 'Iris', teamId: BENCH_ID, roleName: 'Release Specialist', roleDescription: 'Available for release validation assignments.', isTeamLead: false, color: AGENT_COLORS[8], provider: 'openai', model: 'gpt-5.4-mini', effort: 'low', systemPrompt: 'Awaiting assignment.', status: 'idle', tasks: [] },
-  { id: 'a10', name: 'Juno', teamId: BENCH_ID, parentAgentId: 'a9', roleName: 'Software Generalist', roleDescription: 'Available for implementation assignments.', isTeamLead: false, color: AGENT_COLORS[9], provider: 'anthropic', model: 'claude-sonnet-5', effort: 'medium', systemPrompt: 'Awaiting assignment.', status: 'idle', tasks: [] },
+  { id: 'a10', name: 'Juno', teamId: BENCH_ID, parentAgentId: 'a9', roleName: 'Software Generalist', roleDescription: 'Available for implementation assignments.', isTeamLead: false, color: AGENT_COLORS[9], provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'medium', systemPrompt: 'Awaiting assignment.', status: 'idle', tasks: [] },
 ]
 
-const effortTokens: Record<Effort, number> = { low: 1200, medium: 2600, high: 5200 }
+const effortTokens: Record<Effort, number> = { low: 1600, medium: 3600, high: 6000 }
 const agentSystem = (agent: Agent, extra = '') => [
   `Your role is ${agent.roleName}.`, agent.roleDescription,
   agent.isTeamLead ? 'You are the team lead: coordinate collaborators, review their work rigorously, and own the final quality.' : 'You are a contributing team member. Deliver your assigned part and make it easy for the team lead to integrate.',
   agent.systemPrompt,
   agent.memory?.length ? `Approved learning memory. Reuse these lessons only while completing work the user has explicitly assigned:\n${agent.memory.map((item) => `- ${item.lesson}`).join('\n')}` : '',
+  'Quality standard: deliver a complete, accurate, client-ready answer. Ground claims in attached files first, distinguish facts from assumptions, preserve document names and versions, and verify that every requested requirement is covered before answering.',
+  'You may use read-only web research when it materially improves the assigned work. Cite useful web sources with descriptive links. Never take an external action, publish, purchase, send, or modify another system without the workspace owner’s approval.',
   extra,
 ].filter(Boolean).join('\n\n')
-const formattedPrompt = (brief: string, outputFormat: string) => `${brief}\n\nRequired output format: ${outputFormat || 'Use the clearest appropriate format.'}\nReturn the deliverable directly; do not describe what you would do.`
+const formattedPrompt = (brief: string, outputFormat: string) => `${brief}\n\nREQUIRED DELIVERY FORMAT\n${outputFormat || 'Use the clearest appropriate format.'}\n\nDELIVERY RULES\n- Return the finished deliverable itself, never a plan for doing it or a request to re-upload a file that is attached.\n- Read all attached content and use it as primary evidence.\n- Produce polished Markdown structure internally (headings, lists, tables and links as useful); Autowork will render it and create the requested downloadable file.\n- Be specific, substantive and concise. Do not pad the answer with generic disclaimers.\n- If information is genuinely missing, state the exact gap after completing everything that can be completed.`
+
+const searchWords = (value: string, stripFileExtension = false) => (stripFileExtension
+  ? value.replace(/\.[a-z0-9]{1,8}$/i, '')
+  : value
+).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+/**
+ * Uploaded files remain opt-in, but mentioning a file by name attaches it
+ * automatically. If the workspace contains only one file, phrases such as
+ * "the uploaded document" also resolve to it. This closes the common gap
+ * between adding a file to the Files library and remembering a second click
+ * while assigning the work.
+ */
+export function resolveTaskAttachments(brief: string, selected: string[], available = useFiles.getState().files): string[] {
+  if (selected.length) return [...new Set(selected)].slice(0, 12)
+  const request = searchWords(brief)
+  const mentioned = available.filter((file) => {
+    const full = searchWords(file.name, true)
+    return full.length >= 3 && request.includes(full)
+  }).map((file) => file.name)
+  if (mentioned.length) return mentioned.slice(0, 12)
+  if (available.length === 1 && /\b(file|document|attachment|upload|uploaded|pdf|word|spreadsheet|presentation)\b/i.test(brief)) {
+    return [available[0].name]
+  }
+  return []
+}
 
 async function invoke(agent: Agent, prompt: string, attachments: string[], extraSystem = '', signal?: AbortSignal) {
-  return callModel({ provider: agent.provider, model: agent.model, system: agentSystem(agent, extraSystem), prompt, effort: agent.effort, maxTokens: effortTokens[agent.effort], attachments }, signal ?? agentControllers.get(agent.id)?.signal)
+  return callModel({ provider: agent.provider, model: agent.model, system: agentSystem(agent, extraSystem), prompt, effort: agent.effort, maxTokens: effortTokens[agent.effort], attachments, webAccess: true }, signal ?? agentControllers.get(agent.id)?.signal)
 }
 
 const agentControllers = new Map<string, AbortController>()
@@ -211,7 +245,7 @@ function migrateAgent(raw: unknown, index: number): Agent {
     ...(typeof value.parentAgentId === 'string' ? { parentAgentId: value.parentAgentId } : {}),
     roleName: value.roleName || legacy?.name || 'Specialist', roleDescription: value.roleDescription || legacy?.description || value.systemPrompt || 'Describe this agent’s responsibilities.',
     isTeamLead: value.isTeamLead ?? value.roleId === 'team-lead', color: value.color || AGENT_COLORS[index % AGENT_COLORS.length],
-    provider: value.provider || 'anthropic', model: value.model || defaultModelFor(value.provider || 'anthropic'),
+    provider: value.provider || 'anthropic', model: value.model && isModelValidFor(value.provider || 'anthropic', value.model) ? value.model : defaultModelFor(value.provider || 'anthropic'),
     effort: value.effort || (typeof value.temperature === 'number' && value.temperature < .2 ? 'low' : typeof value.temperature === 'number' && value.temperature > .45 ? 'high' : 'medium'),
     systemPrompt: value.systemPrompt || '', status: value.status === 'working' ? 'idle' : value.status || 'idle',
     tasks: Array.isArray(value.tasks) ? value.tasks.map((task) => ({ ...task, outputFormat: task.outputFormat || 'Use the clearest appropriate format.' })) : [],
@@ -361,16 +395,26 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         : agent) }
   }),
 
-  addTask: (agentId, text, outputFormat = 'Use the clearest appropriate format.', attachments = []) => { const trimmed = text.trim(); if (!trimmed) return; set((state) => ({ agents: state.agents.map((agent) => agent.id === agentId ? { ...agent, tasks: [...agent.tasks, { id: uid('task'), text: trimmed, attachments, outputFormat, status: 'pending' }] } : agent) })) },
+  addTask: (agentId, text, outputFormat = 'Use the clearest appropriate format.', attachments = []) => { const trimmed = text.trim(); if (!trimmed) return; const resolved = resolveTaskAttachments(trimmed, attachments); set((state) => ({ agents: state.agents.map((agent) => agent.id === agentId ? { ...agent, tasks: [...agent.tasks, { id: uid('task'), text: trimmed, attachments: resolved, outputFormat, status: 'pending' }] } : agent) })) },
   updateTask: (agentId, taskId, patch) => set((state) => ({ agents: state.agents.map((agent) => agent.id === agentId ? { ...agent, tasks: agent.tasks.map((task) => task.id === taskId ? { ...task, ...patch } : task) } : agent) })),
   removeTask: (agentId, taskId) => set((state) => ({ agents: state.agents.map((agent) => agent.id === agentId ? { ...agent, tasks: agent.tasks.filter((task) => task.id !== taskId) } : agent) })),
-  resetTask: (agentId, taskId) => get().updateTask(agentId, taskId, { status: 'pending', output: undefined, error: undefined, finishedAt: undefined, durationMs: undefined }),
-  approveTask: (agentId, taskId) => set((state) => ({ agents: state.agents.map((agent) => {
-    if (agent.id !== agentId) return agent
-    const task = agent.tasks.find((item) => item.id === taskId)
-    if (!task || task.status !== 'awaiting_approval' || !task.output) return agent
-    return { ...learnedAgent(agent, task.id, task.text, task.output), tasks: agent.tasks.map((item) => item.id === taskId ? { ...item, status: 'done', finishedAt: Date.now() } : item) }
-  }) })),
+  resetTask: (agentId, taskId) => get().updateTask(agentId, taskId, { status: 'pending', output: undefined, error: undefined, outputFile: undefined, outputFileError: undefined, finishedAt: undefined, durationMs: undefined }),
+  approveTask: async (agentId, taskId) => {
+    const agent = get().agents.find((item) => item.id === agentId)
+    const task = agent?.tasks.find((item) => item.id === taskId)
+    if (!agent || !task || task.status !== 'awaiting_approval' || !task.output) return
+    let outputFile: string | undefined
+    let outputFileError: string | undefined
+    try {
+      const file = await buildOutputFile(task.output, task.outputFormat, `${agent.name} ${task.text.slice(0, 48)}`)
+      outputFile = await uploadFile(file)
+      await useFiles.getState().refresh()
+    } catch (error) { outputFileError = error instanceof Error ? error.message : 'Could not create the requested output file.' }
+    set((state) => ({ agents: state.agents.map((item) => {
+      if (item.id !== agentId) return item
+      return { ...learnedAgent(item, task.id, task.text, task.output!), tasks: item.tasks.map((current) => current.id === taskId ? { ...current, status: 'done', outputFile, outputFileError } : current) }
+    }) }))
+  },
   requestTaskRevision: (agentId, taskId, feedback = '') => set((state) => ({ agents: state.agents.map((agent) => agent.id === agentId ? { ...agent, tasks: agent.tasks.map((task) => task.id === taskId ? { ...task, status: 'pending', approvalFeedback: feedback.trim() || 'Revise this draft and improve its completeness, accuracy, and requested formatting.', output: undefined, error: undefined } : task) } : agent) })),
   runAgentTasks: async (agentId) => {
     const agent = get().agents.find((item) => item.id === agentId); if (!get().workspaceOnline || !agent || get().running.includes(agentId)) return
@@ -383,9 +427,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       try {
         const manager = get().agents.find((item) => item.id === live.parentAgentId)
         const revision = current.approvalFeedback ? `\n\nThe user requested these changes to the previous draft: ${current.approvalFeedback}` : ''
-        const text = await invoke(live, formattedPrompt(current.text + revision, current.outputFormat), current.attachments, manager ? `You are a sub-agent reporting to ${manager.name} (${manager.roleName}). Complete this directly assigned task within that reporting context.` : '')
-        get().updateTask(agentId, current.id, { status: 'awaiting_approval', approvalFeedback: undefined, output: text || '(the model returned an empty response)', finishedAt: Date.now(), durationMs: Date.now() - startedAt, ranWith: { provider: live.provider, model: live.model } })
-        if (get().skipApprovals) get().approveTask(agentId, current.id)
+        const result = await invoke(live, formattedPrompt(current.text + revision, current.outputFormat), current.attachments, manager ? `You are a sub-agent reporting to ${manager.name} (${manager.roleName}). Complete this directly assigned task within that reporting context.` : '')
+        get().updateTask(agentId, current.id, { status: 'awaiting_approval', approvalFeedback: undefined, output: result.text || '(the model returned an empty response)', finishedAt: Date.now(), durationMs: Date.now() - startedAt, ranWith: { provider: result.provider, model: result.model }, recoveredFromTimeout: result.recoveredFromTimeout })
+        if (get().skipApprovals) await get().approveTask(agentId, current.id)
       }
       catch (error) {
         if (!get().workspaceOnline || controller.signal.aborted) break
@@ -404,7 +448,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   createTeamJob: (teamId, brief, outputFormat, attachments) => {
     const members = get().agents.filter((agent) => agent.teamId === teamId); if (!brief.trim() || !members.length || teamId === BENCH_ID) return null
-    const id = uid('teamjob'); set((state) => ({ teamJobs: [{ id, teamId, brief: brief.trim(), outputFormat: outputFormat.trim() || 'Use the clearest appropriate format.', attachments, status: 'queued', contributions: members.map((agent) => ({ agentId: agent.id, status: 'queued' })), reviewRound: 0, createdAt: Date.now() }, ...state.teamJobs] })); return id
+    const id = uid('teamjob'); const resolved = resolveTaskAttachments(brief, attachments); set((state) => ({ teamJobs: [{ id, teamId, brief: brief.trim(), outputFormat: outputFormat.trim() || 'Use the clearest appropriate format.', attachments: resolved, status: 'queued', contributions: members.map((agent) => ({ agentId: agent.id, status: 'queued' })), reviewRound: 0, createdAt: Date.now() }, ...state.teamJobs] })); return id
   },
   runTeamJob: async (jobId) => {
     const initial = get().teamJobs.find((job) => job.id === jobId); if (!get().workspaceOnline || !initial || get().runningTeams.includes(jobId) || initial.status === 'done') return
@@ -416,21 +460,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set((state) => ({ runningTeams: [...state.runningTeams, jobId] })); patchJob({ status: 'planning', error: undefined }); members.forEach((agent) => get().updateAgent(agent.id, { status: 'working' }))
     try {
       const roster = members.map((agent, index) => `${index + 1}. ${reportingPath(agent, members)} — ${agent.roleName}: ${agent.roleDescription}`).join('\n')
-      const plan = await invoke(lead, `You are delegating a team assignment through a recursive agent hierarchy. Divide it fairly across every listed member, including yourself. Respect the reporting paths: managers coordinate their direct sub-agents, who may coordinate deeper sub-agents. Make responsibilities complementary and explicitly describe how the members should combine their work.\n\nASSIGNMENT\n${initial.brief}\n\nTEAM HIERARCHY\n${roster}\n\nOUTPUT FORMAT\n${initial.outputFormat}\n\nReturn a concise delegation plan.`, initial.attachments)
+      const planResult = await invoke(lead, `You are delegating a team assignment through a recursive agent hierarchy. Divide it fairly across every listed member, including yourself. Respect the reporting paths: managers coordinate their direct sub-agents, who may coordinate deeper sub-agents. Make responsibilities complementary and explicitly describe how the members should combine their work.\n\nASSIGNMENT\n${initial.brief}\n\nTEAM HIERARCHY\n${roster}\n\nOUTPUT FORMAT\n${initial.outputFormat}\n\nReturn a concise delegation plan.`, initial.attachments)
+      const plan = planResult.text
       patchJob({ status: 'delegated', plan }); const collected: Array<{ agent: Agent; output: string }> = []
       for (let index = 0; index < contributors.length; index++) {
         const member = contributors[index]; patchContribution(member.id, { status: 'working', error: undefined }); const prior = collected.length ? `\n\nWORK ALREADY CONTRIBUTED\n${collected.map((item) => `${item.agent.name}:\n${item.output}`).join('\n\n')}` : ''
-        try { const output = await invoke(member, `Collaborate on this team assignment as member ${index + 1} of ${contributors.length}. Your reporting path is ${reportingPath(member, members)}. Follow the lead's delegation plan, coordinate through your immediate manager or sub-agents where applicable, build on prior contributions, and complete your own responsibility.\n\nASSIGNMENT\n${initial.brief}\n\nDELEGATION PLAN\n${plan}${prior}\n\nTARGET OUTPUT FORMAT\n${initial.outputFormat}`, initial.attachments); collected.push({ agent: member, output }); patchContribution(member.id, { status: 'done', output }) }
+        try { const result = await invoke(member, `Collaborate on this team assignment as member ${index + 1} of ${contributors.length}. Your reporting path is ${reportingPath(member, members)}. Follow the lead's delegation plan, coordinate through your immediate manager or sub-agents where applicable, build on prior contributions, and complete your own responsibility.\n\nASSIGNMENT\n${initial.brief}\n\nDELEGATION PLAN\n${plan}${prior}\n\nTARGET OUTPUT FORMAT\n${initial.outputFormat}`, initial.attachments); const output = result.text; collected.push({ agent: member, output }); patchContribution(member.id, { status: 'done', output, ranWith: { provider: result.provider, model: result.model }, recoveredFromTimeout: result.recoveredFromTimeout }) }
         catch (error) { patchContribution(member.id, { status: 'error', error: error instanceof Error ? error.message : 'Contribution failed.' }); throw error }
       }
       let finalOutput = ''; let reviewNotes = ''
       for (let round = 1; round <= 2; round++) {
         patchJob({ status: 'reviewing', reviewRound: round }); const packet = collected.map((item) => `### ${item.agent.name} — ${item.agent.roleName}\n${item.output}`).join('\n\n')
-        const review = await invoke(lead, `Review the team's work against every requirement. If it is satisfactory, begin with "VERDICT: APPROVED" and put the polished, fully integrated deliverable after "FINAL:". If substantive work remains, begin with "VERDICT: REVISE" and give exact correction instructions after "FEEDBACK:".\n\nORIGINAL ASSIGNMENT\n${initial.brief}\n\nREQUIRED OUTPUT FORMAT\n${initial.outputFormat}\n\nTEAM CONTRIBUTIONS\n${packet}`, initial.attachments, 'Act as a strict quality gate. Never approve incomplete, inconsistent, or incorrectly formatted work.')
+        const reviewResult = await invoke(lead, `Review the team's work against every requirement. If it is satisfactory, begin with "VERDICT: APPROVED" and put the polished, fully integrated deliverable after "FINAL:". If substantive work remains, begin with "VERDICT: REVISE" and give exact correction instructions after "FEEDBACK:".\n\nORIGINAL ASSIGNMENT\n${initial.brief}\n\nREQUIRED OUTPUT FORMAT\n${initial.outputFormat}\n\nTEAM CONTRIBUTIONS\n${packet}`, initial.attachments, 'Act as a strict quality gate. Never approve incomplete, inconsistent, or incorrectly formatted work.')
+        const review = reviewResult.text
         reviewNotes = review; if (/VERDICT:\s*APPROVED/i.test(review)) { finalOutput = review.split(/FINAL:/i).slice(1).join('FINAL:').trim() || review; break }
-        if (round < 2) { patchJob({ status: 'revising', reviewNotes: review }); for (const member of contributors.filter((agent) => agent.id !== lead.id)) { patchContribution(member.id, { status: 'revision' }); const existing = collected.find((item) => item.agent.id === member.id); const revised = await invoke(member, `Revise your contribution using the team lead's review. Resolve every issue relevant to your role and return replacement work.\n\nASSIGNMENT\n${initial.brief}\n\nYOUR PREVIOUS WORK\n${existing?.output || ''}\n\nTEAM LEAD FEEDBACK\n${review}`, initial.attachments); if (existing) existing.output = revised; patchContribution(member.id, { status: 'done', output: revised }) } }
+        if (round < 2) { patchJob({ status: 'revising', reviewNotes: review }); for (const member of contributors.filter((agent) => agent.id !== lead.id)) { patchContribution(member.id, { status: 'revision' }); const existing = collected.find((item) => item.agent.id === member.id); const revisedResult = await invoke(member, `Revise your contribution using the team lead's review. Resolve every issue relevant to your role and return replacement work.\n\nASSIGNMENT\n${initial.brief}\n\nYOUR PREVIOUS WORK\n${existing?.output || ''}\n\nTEAM LEAD FEEDBACK\n${review}`, initial.attachments); const revised = revisedResult.text; if (existing) existing.output = revised; patchContribution(member.id, { status: 'done', output: revised, ranWith: { provider: revisedResult.provider, model: revisedResult.model }, recoveredFromTimeout: revisedResult.recoveredFromTimeout }) } }
       }
-      if (!finalOutput) { const packet = collected.map((item) => `${item.agent.name}:\n${item.output}`).join('\n\n'); finalOutput = await invoke(lead, `Produce the final client-ready deliverable now. Correct the remaining review issues yourself, integrate the team work, follow the requested format exactly, and do not include process commentary.\n\nASSIGNMENT\n${initial.brief}\n\nFORMAT\n${initial.outputFormat}\n\nLATEST TEAM WORK\n${packet}\n\nLAST REVIEW\n${reviewNotes}`, initial.attachments) }
+      if (!finalOutput) { const packet = collected.map((item) => `${item.agent.name}:\n${item.output}`).join('\n\n'); finalOutput = (await invoke(lead, `Produce the final client-ready deliverable now. Correct the remaining review issues yourself, integrate the team work, follow the requested format exactly, and do not include process commentary.\n\nASSIGNMENT\n${initial.brief}\n\nFORMAT\n${initial.outputFormat}\n\nLATEST TEAM WORK\n${packet}\n\nLAST REVIEW\n${reviewNotes}`, initial.attachments)).text }
       patchJob({ status: 'awaiting_approval', finalOutput, reviewNotes }); members.forEach((agent) => get().updateAgent(agent.id, { status: 'idle' }))
       if (get().skipApprovals) await get().approveTeamJob(jobId)
     } catch (error) {
@@ -445,11 +491,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const job = get().teamJobs.find((item) => item.id === jobId)
     if (!job || job.status !== 'awaiting_approval' || !job.finalOutput) return
     const teamName = get().teams.find((team) => team.id === job.teamId)?.name ?? 'Team'
-    const outputFile = `${slug(teamName) || 'team'}-delivery-${jobId.slice(-7)}.md`
+    let outputFile: string | undefined
     let outputFileError: string | undefined
     try {
-      const artifact = `# ${teamName} delivery\n\n**Assignment:** ${job.brief}\n\n**Requested format:** ${job.outputFormat}\n\n---\n\n${job.finalOutput}`
-      await uploadFile(new File([artifact], outputFile, { type: 'text/markdown', lastModified: Date.now() }))
+      const artifact = await buildOutputFile(job.finalOutput, job.outputFormat, `${teamName} ${job.brief.slice(0, 48)}`)
+      outputFile = await uploadFile(artifact)
       await useFiles.getState().refresh()
     } catch (error) { outputFileError = error instanceof Error ? error.message : 'Could not add the team output to shared files.' }
     set((state) => ({

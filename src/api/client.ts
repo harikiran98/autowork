@@ -26,6 +26,16 @@ export interface ChatRequest {
   attachments?: string[]
   /** Browser-stored files are sent only when they are attached to a task. */
   attachmentContents?: AttachmentContent[]
+  /** Gives the provider a read-only web-search tool when supported. */
+  webAccess?: boolean
+}
+
+export interface ChatResult {
+  text: string
+  provider: ProviderId
+  model: string
+  recoveredFromTimeout?: boolean
+  webUsed?: boolean
 }
 
 export type FileKind = 'text' | 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'image' | 'audio' | 'video' | 'archive' | 'binary'
@@ -50,16 +60,18 @@ export interface AttachmentContent {
 
 export class ApiError extends Error {
   readonly missingKey?: string
-  constructor(message: string, missingKey?: string) {
+  readonly status?: number
+  constructor(message: string, missingKey?: string, status?: number) {
     super(message)
     this.name = 'ApiError'
     this.missingKey = missingKey
+    this.status = status
   }
 }
 
 async function parse<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string; missingKey?: string }
-  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, data.missingKey)
+  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, data.missingKey, res.status)
   return data
 }
 
@@ -77,6 +89,10 @@ const MAX_WORKSPACE_BYTES = 50 * 1024 * 1024
 const MAX_TASK_TRANSFER_BYTES = 4 * 1024 * 1024
 const MAX_EXTRACTED_TEXT_BYTES = 2 * 1024 * 1024
 const ACCESS_KEY = 'agent-workplace:gateway-access'
+const FAST_MODEL_BY_PROVIDER: Record<ProviderId, string> = {
+  openai: 'gpt-5.4-mini',
+  anthropic: 'claude-haiku-4-5',
+}
 const TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml',
   'toml', 'ini', 'cfg', 'xml', 'html', 'htm', 'css', 'scss', 'js', 'mjs', 'cjs',
@@ -344,7 +360,7 @@ export async function getHealth(signal?: AbortSignal): Promise<HealthReport> {
 
 /* --------------------------------- chat ---------------------------------- */
 
-export async function runAgent(req: ChatRequest, signal?: AbortSignal): Promise<string> {
+export async function runAgent(req: ChatRequest, signal?: AbortSignal): Promise<ChatResult> {
   let attachmentContents: AttachmentContent[]
   try {
     attachmentContents = await Promise.all(
@@ -366,22 +382,50 @@ export async function runAgent(req: ChatRequest, signal?: AbortSignal): Promise<
     throw new ApiError(error instanceof Error ? `Could not prepare attachments: ${error.message}` : 'Could not prepare attachments.')
   }
 
-  let res: Response
-  try {
-    res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(getAccessCode() ? { 'x-workplace-access': getAccessCode() } : {}),
-      },
-      body: JSON.stringify({ ...req, attachments: [], attachmentContents }),
-      signal,
-    })
-  } catch {
-    throw unreachable()
+  const request = async (payload: ChatRequest) => {
+    let res: Response
+    try {
+      res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(getAccessCode() ? { 'x-workplace-access': getAccessCode() } : {}),
+        },
+        body: JSON.stringify({ ...payload, attachments: [], attachmentContents }),
+        signal,
+      })
+    } catch {
+      throw unreachable()
+    }
+    const data = await parse<Partial<ChatResult>>(res)
+    return { text: data.text ?? '', provider: data.provider ?? payload.provider, model: data.model ?? payload.model, webUsed: data.webUsed }
   }
-  const data = await parse<{ text?: string }>(res)
-  return data.text ?? ''
+
+  try {
+    return await request(req)
+  } catch (error) {
+    // A timeout retry is a new Netlify invocation, so it receives a fresh
+    // hosted execution window. Use the same provider's fast model at low
+    // effort; the API key, attachment contract and privacy boundary stay the
+    // same while the retry is materially more likely to finish.
+    if (!(error instanceof ApiError) || error.status !== 504 || signal?.aborted) throw error
+    const recoveryModel = FAST_MODEL_BY_PROVIDER[req.provider]
+    try {
+      const recovered = await request({
+        ...req,
+        model: recoveryModel,
+        effort: 'low',
+        maxTokens: Math.min(req.maxTokens ?? 1600, 1600),
+        system: `${req.system ?? ''}\n\nTimeout recovery: the original ${req.model} request exceeded the hosted response window. Produce the complete requested deliverable concisely. Prioritise the user's requirements and final answer over process commentary.`.trim(),
+      })
+      return { ...recovered, recoveredFromTimeout: true }
+    } catch (retryError) {
+      if (retryError instanceof ApiError && retryError.status === 504) {
+        throw new ApiError(`Both ${req.model} and the automatic ${recoveryModel} recovery exceeded the hosted response window. The assignment is still queued; divide it into smaller parts and retry.`, undefined, 504)
+      }
+      throw retryError
+    }
+  }
 }
 
 /* --------------------------------- state --------------------------------- */

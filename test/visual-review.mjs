@@ -68,10 +68,15 @@ try {
   assert.notDeepEqual(walkMiddle.position, walkStart, 'Reassigned agent must leave the desk by walking')
   assert.ok(Math.abs(walkMiddle.bodyY) < .2, 'Agent must stand while walking to the bench')
   await page.waitForTimeout(8000)
-  const walkEnd = await page.evaluate(() => {
-    const agent = window.reviewScene.getObjectByName('agent-a1')
-    return { position: agent.position.toArray(), bodyY: agent.getObjectByName('character-body').position.y }
-  })
+  let walkEnd
+  for (let attempt = 0; attempt < 24; attempt++) {
+    walkEnd = await page.evaluate(() => {
+      const agent = window.reviewScene.getObjectByName('agent-a1')
+      return { position: agent.position.toArray(), bodyY: agent.getObjectByName('character-body').position.y }
+    })
+    if (walkEnd.bodyY < -.1) break
+    await page.waitForTimeout(500)
+  }
   console.log('Bench walk:', JSON.stringify({ walkStart, walkMiddle, walkEnd }))
   assert.notDeepEqual(walkEnd.position, walkMiddle.position, 'Agent must continue toward the couch instead of teleporting')
   assert.ok(walkEnd.bodyY > -.2 && walkEnd.bodyY < -.1, 'Agent must rest on top of the couch cushion without sinking into it')

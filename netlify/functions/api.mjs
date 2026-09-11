@@ -11,46 +11,52 @@ const MAX_ATTACHMENTS = 12
  * Upstream model budget, deliberately kept *below* Netlify's own synchronous
  * function timeout.
  *
- * That platform limit is 10 seconds by default and 26 seconds at the very
- * most, and Netlify enforces it by killing the invocation. A budget above the
- * ceiling therefore does the opposite of what it looks like: the function is
- * terminated before it can return the explanatory error below, so the browser
- * receives a bare gateway 504 with no JSON body at all. Team assignments hit
- * this first because the lead's planning and review calls are the largest and
- * highest-effort requests the app makes.
+ * Netlify's current synchronous execution limit is 60 seconds. Keep eight
+ * seconds for authentication, JSON parsing, network setup and serialising the
+ * response so the function can return a useful JSON error before the platform
+ * replaces it with a bare gateway 504. Team assignments hit this first because
+ * the lead's planning and review calls are the largest requests in the app.
  *
- * Set MODEL_TIMEOUT_MS if Netlify has granted this site a different ceiling.
+ * MODEL_TIMEOUT_MS may shorten this budget, but is deliberately capped at the
+ * safe hosted value.
  */
-const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(120000, Number(process.env.MODEL_TIMEOUT_MS) || 24000))
+export const MODEL_TIMEOUT_MS = Math.max(5000, Math.min(52000, Number(process.env.MODEL_TIMEOUT_MS) || 52000))
 const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+
+const appendSources = (text, citations) => {
+  const unique = [...new Map(citations.filter((item) => item?.url).map((item) => [item.url, item])).values()]
+  const missing = unique.filter((item) => !String(text).includes(item.url))
+  return missing.length ? `${text}\n\n### Sources\n${missing.map((item) => `- [${item.title || item.url}](${item.url})`).join('\n')}` : text
+}
 
 const PROVIDERS = {
   openai: {
     envKey: 'OPENAI_API_KEY',
-    endpoint: () => `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`,
+    endpoint: () => `${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/responses`,
     headers: (key) => ({ 'content-type': 'application/json', authorization: `Bearer ${key}` }),
-    body: ({ model, system, prompt, effort, maxTokens, attachments }) => {
-      const isReasoning = /^o\d/.test(model)
+    body: ({ model, system, prompt, effort, maxTokens, attachments, webAccess }) => {
       const content = [
-        { type: 'text', text: prompt },
-        // Both parts need a full data URL. Passing bare base64 as `file_data`
-        // is accepted but unreadable, so the model answered as though nothing
-        // had been attached at all.
+        { type: 'input_text', text: prompt },
         ...attachments.map((file) => file.mimeType.startsWith('image/')
-          ? { type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.data}` } }
-          : { type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` } }),
+          ? { type: 'input_image', image_url: `data:${file.mimeType};base64,${file.data}` }
+          : { type: 'input_file', filename: file.name, file_data: `data:${file.mimeType};base64,${file.data}` }),
       ]
       return {
         model,
-        messages: [
-          ...(system ? [{ role: 'system', content: system }] : []),
-          { role: 'user', content: attachments.length ? content : prompt },
-        ],
-        ...(isReasoning ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
-        reasoning_effort: effort,
+        ...(system ? { instructions: system } : {}),
+        input: [{ role: 'user', content }],
+        max_output_tokens: maxTokens,
+        reasoning: { effort },
+        ...(webAccess ? { tools: [{ type: 'web_search', search_context_size: effort }] } : {}),
+        store: false,
       }
     },
-    text: (data) => data?.choices?.[0]?.message?.content ?? '',
+    text: (data) => {
+      const parts = (data?.output ?? []).flatMap((item) => item?.content ?? []).filter((part) => part?.type === 'output_text')
+      const citations = parts.flatMap((part) => part.annotations ?? []).map((item) => item?.url_citation ?? item).filter((item) => item?.url)
+      return appendSources(parts.map((part) => part.text ?? '').join('\n'), citations)
+    },
+    webUsed: (data) => (data?.output ?? []).some((item) => item?.type === 'web_search_call'),
   },
   anthropic: {
     envKey: 'ANTHROPIC_API_KEY',
@@ -60,10 +66,12 @@ const PROVIDERS = {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     }),
-    body: ({ model, system, prompt, effort, maxTokens, attachments }) => ({
+    body: ({ model, system, prompt, effort, maxTokens, attachments, webAccess }) => ({
       model,
       max_tokens: maxTokens,
-      ...(/(?:-5|4\.[6-9])/.test(model) ? { thinking: { type: 'adaptive' }, output_config: { effort } } : {}),
+      // Low/medium/high still controls the output token budget. Adaptive
+      // thinking is not sent to models that reject that request shape.
+      ...(webAccess ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: effort === 'high' ? 6 : effort === 'medium' ? 4 : 2 }] } : {}),
       ...(system ? { system } : {}),
       messages: [{
         role: 'user',
@@ -75,9 +83,13 @@ const PROVIDERS = {
         ] : prompt,
       }],
     }),
-    text: (data) => Array.isArray(data?.content)
-      ? data.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
-      : '',
+    text: (data) => {
+      if (!Array.isArray(data?.content)) return ''
+      const textParts = data.content.filter((part) => part.type === 'text')
+      const citations = textParts.flatMap((part) => part.citations ?? []).filter((item) => item?.url)
+      return appendSources(textParts.map((part) => part.text).join(''), citations)
+    },
+    webUsed: (data) => Array.isArray(data?.content) && data.content.some((part) => part.type === 'web_search_tool_result' || part.type === 'server_tool_use'),
   },
 }
 
@@ -147,6 +159,7 @@ const handleEvent = async (event, authenticated = true) => {
       effort = 'medium',
       maxTokens = 2048,
       attachmentContents = [],
+      webAccess = true,
     } = body
     const adapter = PROVIDERS[provider]
 
@@ -188,6 +201,7 @@ const handleEvent = async (event, authenticated = true) => {
         attachments: nativeAttachments,
         effort: ['low', 'medium', 'high'].includes(effort) ? effort : 'medium',
         maxTokens: Math.max(1, Math.min(8192, Number(maxTokens) || 2048)),
+        webAccess: webAccess !== false,
       })),
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     })
@@ -203,13 +217,14 @@ const handleEvent = async (event, authenticated = true) => {
       provider,
       model,
       attachmentsUsed: attachments.map((file) => file.name),
+      webUsed: adapter.webUsed(data),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed.'
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || message.toLowerCase().includes('timeout'))
     return response(timedOut ? 504 : 400, {
       error: timedOut
-        ? `This model did not finish within the ${Math.round(MODEL_TIMEOUT_MS / 1000)}-second hosted response window. Retry with lower effort or a faster model; your task remains available to re-run.`
+        ? `This model did not finish within the ${Math.round(MODEL_TIMEOUT_MS / 1000)}-second hosted response window. Autowork will retry this step once with the same provider's fast model at low effort.`
         : message,
     })
   }

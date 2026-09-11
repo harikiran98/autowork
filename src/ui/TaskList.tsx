@@ -3,6 +3,7 @@ import { getAccessCode, setAccessCode } from '../api/client'
 import { useApiHealth } from '../api/useApiHealth'
 import { useFiles } from '../state/filesStore'
 import { pendingCount, useWorkspace, type Agent, type Task } from '../state/workspaceStore'
+import { OutputActions, RichOutput } from './RichOutput'
 
 const STATUS_LABEL: Record<Task['status'], string> = {
   pending: 'Queued',
@@ -122,7 +123,7 @@ function TaskRow({ agentId, task }: { agentId: string; task: Task }) {
 
       {hasResult && (
         <div className="mt-2.5 space-y-2">
-          {task.status === 'awaiting_approval' && <div className="rounded-2xl border border-accent/30 bg-accent-ring p-3"><p className="text-xs font-semibold text-ink">Draft ready. Review it before this agent learns from it.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => approveTask(agentId, task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve & learn</button><button type="button" onClick={() => requestTaskRevision(agentId, task.id)} className="rounded-full bg-surface px-3 py-1.5 text-[11px] font-bold text-ink-soft ring-1 ring-line">Request revision</button></div></div>}
+          {task.status === 'awaiting_approval' && <div className="rounded-2xl border border-accent/30 bg-accent-ring p-3"><p className="text-xs font-semibold text-ink">Draft ready. Review it before this agent learns from it.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => void approveTask(agentId, task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve, save & learn</button><button type="button" onClick={() => requestTaskRevision(agentId, task.id)} className="rounded-full bg-surface px-3 py-1.5 text-[11px] font-bold text-ink-soft ring-1 ring-line">Request revision</button></div></div>}
           <div className="flex gap-2">
             <button
               type="button"
@@ -140,10 +141,9 @@ function TaskRow({ agentId, task }: { agentId: string; task: Task }) {
             </button>
           </div>
           {expanded && (
-            <p className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-line bg-surface px-3.5 py-3 text-xs leading-relaxed text-ink">
-              {task.output ?? task.error}
-            </p>
+            <div className="max-h-96 overflow-y-auto rounded-2xl border border-line bg-surface px-4 py-3">{task.output ? <RichOutput content={task.output} /> : <p className="text-xs leading-relaxed text-warn">{task.error}</p>}</div>
           )}
+          {expanded && task.output && <OutputActions content={task.output} format={task.outputFormat} title={task.text} />}
         </div>
       )}
     </li>

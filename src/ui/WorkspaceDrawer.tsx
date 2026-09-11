@@ -3,6 +3,7 @@ import { useFiles } from '../state/filesStore'
 import { completedTasks, useWorkspace } from '../state/workspaceStore'
 import { useAccentColor, usePillStyle } from '../theme/pill'
 import { WorkBoard } from './WorkBoard'
+import { OutputActions, RichOutput } from './RichOutput'
 
 export type DrawerTab = 'work' | 'files' | 'outputs'
 
@@ -125,17 +126,6 @@ function OutputsTab() {
   const teamResults = teamJobs.filter((job) => job.status === 'awaiting_approval' || job.status === 'done' || job.status === 'error')
   const pill = usePillStyle()
   const accent = useAccentColor()
-  const [copied, setCopied] = useState<string | null>(null)
-
-  const copy = async (id: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(id)
-      setTimeout(() => setCopied(null), 1600)
-    } catch {
-      setCopied(null)
-    }
-  }
 
   if (!results.length && !teamResults.length) {
     return (
@@ -178,17 +168,8 @@ function OutputsTab() {
             )}
             {job.outputFile && <p className="mt-1 text-[11px] font-semibold text-ok">Shared workspace file: {job.outputFile}</p>}
 
-            <p className="mt-2.5 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-line bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink">
-              {body}
-            </p>
-
-            <button
-              type="button"
-              onClick={() => void copy(job.id, body)}
-              className="mt-2.5 rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-semibold text-ink-soft transition-colors hover:text-ink"
-            >
-              {copied === job.id ? 'Copied' : 'Copy team output'}
-            </button>
+            <div className="mt-3 max-h-[34rem] overflow-y-auto rounded-2xl border border-line bg-surface-2 px-5 py-4">{job.error ? <p className="text-sm text-warn">{job.error}</p> : <RichOutput content={body} />}</div>
+            {job.finalOutput && <div className="mt-3"><OutputActions content={job.finalOutput} format={job.outputFormat} title={`${team?.name ?? 'Team'} ${job.brief}`} /></div>}
           </article>
         )
       })}
@@ -222,18 +203,10 @@ function OutputsTab() {
               <p className="mt-1 text-[11px] text-ink-faint">Files: {task.attachments.join(', ')}</p>
             )}
 
-            <p className="mt-2.5 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-line bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink">
-              {body}
-            </p>
+            <div className="mt-3 max-h-[34rem] overflow-y-auto rounded-2xl border border-line bg-surface-2 px-5 py-4">{task.error && !task.output ? <p className="text-sm text-warn">{task.error}</p> : <RichOutput content={body} />}</div>
 
             <div className="mt-2.5 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void copy(task.id, body)}
-                className="rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-semibold text-ink-soft transition-colors hover:text-ink"
-              >
-                {copied === task.id ? 'Copied' : 'Copy output'}
-              </button>
+              {task.output && <OutputActions compact content={task.output} format={task.outputFormat} title={`${agent.name} ${task.text}`} />}
               {task.ranWith && (
                 <span className="text-[11px] text-ink-faint">
                   {task.ranWith.model}
@@ -287,7 +260,7 @@ export function WorkspaceDrawer({
 
   return (
     <aside
-      className={`glass-panel pointer-events-auto absolute bottom-[72px] left-3 right-3 z-40 mx-auto flex max-h-[70vh] w-auto max-w-4xl flex-col overflow-hidden rounded-[30px] transition-[margin] duration-300 xl:bottom-5 xl:left-[300px] xl:right-5 ${
+      className={`glass-panel pointer-events-auto absolute bottom-[72px] left-3 right-3 z-40 mx-auto flex w-auto flex-col overflow-hidden rounded-[30px] transition-[margin] duration-300 xl:bottom-5 xl:left-[300px] xl:right-5 ${tab === 'outputs' ? 'max-h-[82vh] max-w-6xl' : 'max-h-[70vh] max-w-4xl'} ${
         panelOpen ? 'xl:mr-[450px]' : ''
       }`}
       style={{ animation: 'riseIn 260ms cubic-bezier(0.16, 1, 0.3, 1)' }}

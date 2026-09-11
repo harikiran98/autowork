@@ -8,7 +8,8 @@ Vite, with local and Netlify serverless model gateways.
 The interface has invite-only Netlify Identity login, personal workspace setup,
 free-form agent roles, individual and reviewed team assignments, switchable
 office/neural-network views, recursive sub-agent hierarchies, approval-gated
-learning, per-user persistence, broad file support, softened
+learning, provider-native web research with citations, per-user persistence,
+broad file support, softened
 light/dark themes, and a Netlify-ready production configuration.
 
 The office includes seated desk pods, ergonomic chairs, oak flooring, monitor UI,
@@ -108,16 +109,18 @@ when that task is run.
 Adding a provider means one entry in the `PROVIDERS` map in `server/index.mjs`
 plus one in `src/data/llm-catalog.ts`.
 
-Hosted model requests are budgeted at 24 seconds, which must stay **below**
-Netlify's own synchronous function timeout — 10 seconds by default and 26
-seconds at the very most. That ceiling is enforced by killing the invocation,
-so a budget above it is worse than a shorter one: the function never gets to
-return its explanatory error and the browser receives a bare gateway 504
-instead. Override with `MODEL_TIMEOUT_MS` if Netlify has granted your site a
-different ceiling. Within the budget, a task that exceeds the window remains
-re-runnable and the UI recommends lower effort or a faster model.
+Hosted model requests are budgeted at 52 seconds inside Netlify's current
+60-second synchronous function limit. The remaining margin lets authentication,
+request parsing and error serialisation finish before Netlify replaces the
+response with a bare gateway 504. `MODEL_TIMEOUT_MS` may shorten this budget,
+but values above 52,000 ms are capped.
 
-Team assignments are the ones that press against this limit, because the team
+If a request times out, the browser automatically retries that workflow step
+using the same provider's fast model at low effort. The assignment, selected
+files, output format and approval flow are preserved; the user does not need to
+change the agent configuration manually.
+
+Team assignments are most likely to press against this limit, because the team
 lead's planning and review calls are the largest and highest-effort requests
 the app makes. Each model call is its own HTTP request, so a long team
 workflow never needs one request to cover the whole thing.
@@ -203,7 +206,7 @@ reviews the combined result, unsatisfactory junior work is returned for one
 revision round, and the lead integrates the final client-ready output. Each
 agent has Low, Medium, or High effort instead of temperature; higher effort
 uses a larger token budget and provider reasoning effort where supported.
-Every completed team delivery is also published as a Markdown file in the
+Every approved delivery is also published in its requested file type in the
 shared workspace library, where any agent or team can attach it to later work.
 
 **Approval and learning.** New drafts wait for the workspace owner by default.
@@ -216,11 +219,22 @@ The *Skip my approval* option enables trusted auto-approval when desired.
 IndexedDB. Word, Excel, PowerPoint, OpenDocument and EPUB packages are converted
 to model-readable text; PDFs and supported images retain their native content;
 other binaries are retained and sent where the selected provider supports them.
-Only files explicitly attached to an assignment cross the model gateway.
+Only files selected for an assignment cross the model gateway. Mentioning an
+uploaded file by name selects it automatically; if the workspace contains one
+file, phrases such as “the uploaded document” select that file as well.
 
-**Outputs.** *Outputs* lists both individual results and lead-reviewed team
-deliveries, including requested format, contributors, review rounds and copy
-controls. Failures appear here too with the provider's error message.
+**Outputs.** *Outputs* renders both individual results and lead-reviewed team
+deliveries as polished documents with headings, lists, tables, code and source
+links. Download controls create real PDF, Word, Excel, PowerPoint, HTML,
+Markdown, JSON, CSV or text files based on the requested format. Approval saves
+that artifact to the common workspace library. Failures remain visible with the
+provider's exact error, and a timeout recovery records the model that actually
+finished the step.
+
+**Research.** Every agent receives a read-only provider web-search tool and may
+use it when current information materially improves assigned work. Sources are
+preserved as clickable citations. Research happens only during work the user
+explicitly starts; external actions remain approval-controlled.
 
 **Persistence.** Teams, agents, task lists, outputs, and workspace files are
 browser-local, which works in both the static production bundle and local

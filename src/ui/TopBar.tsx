@@ -73,7 +73,7 @@ export function TopBar({ drawer, onDrawer, panelOpen = false, user, onSignOut }:
   const [accountOpen, setAccountOpen] = useState(false)
 
   return (
-    <header className={`pointer-events-none absolute left-3 right-3 top-3 z-20 transition-[right] duration-300 xl:left-[300px] xl:top-5 ${panelOpen ? 'xl:right-[460px]' : 'xl:right-5'}`}>
+    <header className={`pointer-events-none absolute left-3 right-3 top-3 z-[80] transition-[right] duration-300 xl:left-[300px] xl:top-5 ${panelOpen ? 'xl:right-[460px]' : 'xl:right-5'}`}>
       <div className="glass-panel pointer-events-auto mx-auto flex h-[68px] max-w-5xl items-center gap-2 rounded-[26px] px-2.5 sm:gap-3 sm:px-3">
         <div className="flex min-w-0 items-center gap-3 pl-1 sm:pr-2">
           <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[17px] bg-solid text-on-solid shadow-lg shadow-black/20">

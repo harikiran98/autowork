@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BENCH_ID } from '../data/org'
 import { useFiles } from '../state/filesStore'
-import { completedTasks, useWorkspace } from '../state/workspaceStore'
+import { completedTasks, resolveTaskAttachments, useWorkspace } from '../state/workspaceStore'
+import { OutputActions, RichOutput } from './RichOutput'
 
 const STAGE_LABEL = {
   queued: 'Ready to start', planning: 'Lead is planning', delegated: 'Team is collaborating',
   reviewing: 'Lead quality review', revising: 'Revisions in progress', awaiting_approval: 'Waiting for your approval', done: 'Delivered', error: 'Needs attention',
 } as const
+
+const QUICK_FORMATS = ['Word document', 'PDF report', 'Excel spreadsheet', 'PowerPoint deck', 'Markdown', 'JSON', 'CSV']
 
 export function WorkBoard() {
   const agents = useWorkspace((state) => state.agents)
@@ -25,6 +28,7 @@ export function WorkBoard() {
   const setSkipApprovals = useWorkspace((state) => state.setSkipApprovals)
   const workspaceOnline = useWorkspace((state) => state.workspaceOnline)
   const files = useFiles((state) => state.files)
+  const refreshFiles = useFiles((state) => state.refresh)
   const availableTeams = useMemo(() => teams.filter((team) => team.id !== BENCH_ID && agents.some((agent) => agent.teamId === team.id)), [agents, teams])
   const [mode, setMode] = useState<'individual' | 'team'>('individual')
   const [target, setTarget] = useState(agents[0]?.id ?? '')
@@ -32,32 +36,27 @@ export function WorkBoard() {
   const [format, setFormat] = useState('Markdown document with clear headings')
   const [attachments, setAttachments] = useState<string[]>([])
   const [starting, setStarting] = useState(false)
-  const [copied, setCopied] = useState(false)
   const latestIndividual = completedTasks(agents)[0]
+  const resolvedAttachments = useMemo(() => resolveTaskAttachments(brief, attachments, files), [brief, attachments, files])
+
+  useEffect(() => { void refreshFiles() }, [refreshFiles])
 
   const targets = mode === 'individual' ? agents : availableTeams
   const effectiveTarget = targets.some((item) => item.id === target) ? target : targets[0]?.id ?? ''
   const toggleFile = (name: string) => setAttachments((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name])
-  const copyLatest = async () => {
-    if (!latestIndividual) return
-    try {
-      await navigator.clipboard.writeText(latestIndividual.task.output ?? latestIndividual.task.error ?? '')
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1400)
-    } catch { setCopied(false) }
-  }
-
   const submit = async () => {
     if (!workspaceOnline || !brief.trim() || !effectiveTarget) return
     setStarting(true)
     try {
       if (mode === 'individual') {
-        addTask(effectiveTarget, brief, format, attachments)
+        addTask(effectiveTarget, brief, format, resolvedAttachments)
         setBrief('')
+        setAttachments([])
         await runAgentTasks(effectiveTarget)
       } else {
-        const id = createTeamJob(effectiveTarget, brief, format, attachments)
+        const id = createTeamJob(effectiveTarget, brief, format, resolvedAttachments)
         setBrief('')
+        setAttachments([])
         if (id) await runTeamJob(id)
       }
     } finally { setStarting(false) }
@@ -77,9 +76,11 @@ export function WorkBoard() {
       {mode === 'team' && effectiveTarget && <p className="mt-2 rounded-2xl bg-accent-ring px-3.5 py-2.5 text-[11px] leading-relaxed text-ink-soft">The team lead plans the split, every member contributes, junior work is reviewed, and unsatisfactory work is automatically returned for revision before final delivery.</p>}
 
       <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Work brief</span><textarea aria-label="Work brief" rows={4} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the result you need, constraints, audience and success criteria…" className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
-      <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Output format</span><input aria-label="Output format" value={format} onChange={(event) => setFormat(event.target.value)} placeholder="PDF-ready report, JSON, email, table, code…" className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
+      <label className="mt-4 block"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Output format</span><input aria-label="Output format" value={format} onChange={(event) => setFormat(event.target.value)} placeholder="PDF report, Word document, spreadsheet, slides, code…" className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-4 focus:ring-accent-ring" /></label>
+      <div className="mt-2 flex flex-wrap gap-1.5">{QUICK_FORMATS.map((item) => <button key={item} type="button" onClick={() => setFormat(item)} className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-colors ${format === item ? 'bg-solid text-on-solid ring-transparent' : 'bg-surface-2 text-ink-faint ring-line hover:text-ink'}`}>{item}</button>)}</div>
+      <p className="mt-2 text-[10px] leading-relaxed text-ink-faint">Answers render as a polished document in Autowork. Download creates the real file type you request.</p>
 
-      {files.length > 0 && <div className="mt-4"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Files</span><div className="flex flex-wrap gap-2">{files.map((file) => <button key={file.name} type="button" aria-pressed={attachments.includes(file.name)} onClick={() => toggleFile(file.name)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition-all ${attachments.includes(file.name) ? 'bg-solid text-on-solid ring-transparent' : 'bg-surface text-ink-soft ring-line hover:text-ink'}`}>{file.name}</button>)}</div></div>}
+      {files.length > 0 && <div className="mt-4"><span className="mb-2 block text-[11px] font-bold uppercase tracking-[.09em] text-ink-faint">Files</span><div className="flex flex-wrap gap-2">{files.map((file) => { const selected = resolvedAttachments.includes(file.name); return <button key={file.name} type="button" aria-pressed={selected} onClick={() => toggleFile(file.name)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition-all ${selected ? 'bg-solid text-on-solid ring-transparent' : 'bg-surface text-ink-soft ring-line hover:text-ink'}`}>{file.name}</button> })}</div><p className="mt-2 text-[10px] leading-relaxed text-ink-faint">Selected files are sent with this assignment. A file is selected automatically when you mention its name; if there is only one file, saying “the uploaded document” also attaches it.</p></div>}
 
       {!workspaceOnline && <p className="mt-4 rounded-2xl border border-[#d5525f]/30 bg-[#d5525f]/10 px-3.5 py-2.5 text-xs font-semibold text-ink">Workspace is shut down. Your queues and agent memory are preserved.</p>}
       <button type="button" onClick={() => void submit()} disabled={!workspaceOnline || starting || !brief.trim() || !effectiveTarget} className="mt-5 w-full rounded-2xl bg-solid py-3 text-sm font-bold text-on-solid shadow-lg transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0">{starting ? (mode === 'team' ? 'Team workflow running…' : 'Agent working…') : workspaceOnline ? 'Assign & start' : 'Workspace is off'}</button>
@@ -90,9 +91,11 @@ export function WorkBoard() {
       <article className="rounded-[22px] border border-line bg-surface p-4">
         <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold text-ink">{latestIndividual.agent.name}</span><span className="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-ink-soft">{latestIndividual.agent.roleName}</span><span className={`ml-auto text-[11px] font-bold ${latestIndividual.task.status === 'done' ? 'text-ok' : latestIndividual.task.status === 'awaiting_approval' ? 'text-accent' : 'text-warn'}`}>{latestIndividual.task.status === 'done' ? 'Delivered' : latestIndividual.task.status === 'awaiting_approval' ? 'Awaiting approval' : 'Needs attention'}</span></div>
         <p className="mt-2 text-xs font-semibold text-ink">{latestIndividual.task.text}</p>
-        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-2xl bg-surface-2 p-3 font-sans text-xs leading-relaxed text-ink">{latestIndividual.task.output ?? latestIndividual.task.error}</pre>
-        {latestIndividual.task.status === 'awaiting_approval' && <div className="mt-3 flex gap-2"><button type="button" onClick={() => approveTask(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve & learn</button><button type="button" onClick={() => requestTaskRevision(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-bold text-ink-soft">Request revision</button></div>}
-        <div className="mt-2 flex items-center justify-between gap-2"><span className="truncate text-[10px] text-ink-faint">{latestIndividual.task.outputFormat}</span><button type="button" onClick={() => void copyLatest()} className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-[10px] font-bold text-ink-soft hover:text-ink">{copied ? 'Copied' : 'Copy output'}</button></div>
+        <div className="mt-3 max-h-96 overflow-auto rounded-2xl bg-surface-2 p-4">{latestIndividual.task.output ? <RichOutput content={latestIndividual.task.output} /> : <p className="text-xs leading-relaxed text-warn">{latestIndividual.task.error}</p>}</div>
+        {latestIndividual.task.recoveredFromTimeout && <p className="mt-2 text-[10px] font-semibold text-ink-faint">Recovered automatically with {latestIndividual.task.ranWith?.model} after the original model timed out.</p>}
+        {latestIndividual.task.outputFile && <p className="mt-2 rounded-xl bg-ok/10 px-3 py-2 text-[11px] font-semibold text-ink-soft">Saved for all workspace teams as <span className="text-ink">{latestIndividual.task.outputFile}</span></p>}
+        {latestIndividual.task.status === 'awaiting_approval' && <div className="mt-3 flex gap-2"><button type="button" onClick={() => void approveTask(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-solid px-3 py-1.5 text-[11px] font-bold text-on-solid">Approve, save & learn</button><button type="button" onClick={() => requestTaskRevision(latestIndividual.agent.id, latestIndividual.task.id)} className="rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-bold text-ink-soft">Request revision</button></div>}
+        {latestIndividual.task.output && <div className="mt-3"><OutputActions compact content={latestIndividual.task.output} format={latestIndividual.task.outputFormat} title={`${latestIndividual.agent.name} ${latestIndividual.task.text}`} /></div>}
       </article>
     </section>}
 
@@ -106,7 +109,7 @@ export function WorkBoard() {
         {job.error && <p className="mt-3 rounded-xl bg-warn/10 px-3 py-2 text-xs text-warn">{job.error}</p>}
         {job.outputFile && <p className="mt-3 rounded-xl bg-ok/10 px-3 py-2 text-[11px] font-semibold text-ink-soft">Shared with every team as <span className="text-ink">{job.outputFile}</span></p>}
         {job.outputFileError && <p className="mt-3 rounded-xl bg-warn/10 px-3 py-2 text-[11px] text-warn">Delivery completed, but its shared file could not be created: {job.outputFileError}</p>}
-        {job.finalOutput && <details className="mt-3"><summary className="cursor-pointer text-xs font-bold text-accent">View final delivery</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-2xl bg-surface-2 p-3 font-sans text-xs leading-relaxed text-ink">{job.finalOutput}</pre></details>}
+        {job.finalOutput && <details className="mt-3"><summary className="cursor-pointer text-xs font-bold text-accent">View final delivery</summary><div className="mt-2 max-h-[34rem] overflow-auto rounded-2xl bg-surface-2 p-4"><RichOutput content={job.finalOutput} /></div><div className="mt-3"><OutputActions compact content={job.finalOutput} format={job.outputFormat} title={`${team?.name ?? 'Team'} ${job.brief}`} /></div></details>}
       </article>
     })}</div></section>}
   </div>
